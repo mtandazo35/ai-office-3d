@@ -17,8 +17,10 @@ import crypto from 'node:crypto';
 const args = new Set(process.argv.slice(2));
 const DESINSTALAR = args.has('--desinstalar') || args.has('--uninstall');
 const DIR = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
-const PUERTO = Number(process.env.PUERTO || 7777);
-const URL_HOOK = process.env.AI_OFFICE_URL || `http://127.0.0.1:${PUERTO}/api/hook`;
+const PUERTO_HOOKS = Number(process.env.PUERTO_HOOKS || 7778);
+const URL_HOOK = process.env.AI_OFFICE_URL || `http://127.0.0.1:${PUERTO_HOOKS}/api/hook`;
+// Para Claude Code en otro equipo: usa el mismo token que la oficina del VPS.
+const TOKEN_DADO = (process.env.AI_OFFICE_TOKEN || '').trim();
 const GUARDIA_MAX_MIN = Number(process.env.GUARDIA_MAX_MIN || 14);
 const CABECERA = 'X-AI-Office-Token';
 
@@ -83,7 +85,12 @@ const quitados = limpiar(hooks);
 let token = null;
 if (!DESINSTALAR) {
   fs.mkdirSync(DIR_OFICINA, { recursive: true, mode: 0o700 });
-  if (fs.existsSync(ARCHIVO_TOKEN)) token = fs.readFileSync(ARCHIVO_TOKEN, 'utf8').trim();
+  if (TOKEN_DADO) {
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(TOKEN_DADO)) salir('AI_OFFICE_TOKEN no tiene un formato válido.');
+    token = TOKEN_DADO;
+    fs.writeFileSync(ARCHIVO_TOKEN, token + '\n', { mode: 0o600 });
+  }
+  if (!token && fs.existsSync(ARCHIVO_TOKEN)) token = fs.readFileSync(ARCHIVO_TOKEN, 'utf8').trim();
   if (!token) {
     token = crypto.randomBytes(32).toString('hex');
     fs.writeFileSync(ARCHIVO_TOKEN, token + '\n', { mode: 0o600 });

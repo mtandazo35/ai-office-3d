@@ -162,3 +162,14 @@ code { font-size: .92em; background: var(--panel-2); padding: 1px 5px; border-ra
   .leyenda { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Acceso */
+.pagina-login { overflow: auto; display: grid; place-items: center; min-height: 100%; padding: 24px 16px; }
+.login { width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+.login .marca h1 { font-size: 20px; }
+.login p { margin: 0; font-size: 14px; }
+#f-login { display: flex; flex-direction: column; gap: 10px; }
+#f-login label { font-size: 13px; color: var(--muted); }
+#f-login input { background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px 12px; }
+#f-login input:focus { border-color: var(--lila); outline: none; }
+.error { color: var(--rojo); font-size: 13.5px; min-height: 1.2em; }

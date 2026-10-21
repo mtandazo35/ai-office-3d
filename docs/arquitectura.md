@@ -69,10 +69,12 @@ Las sesiones **inactivas sin guardia** no ejecutan hooks, así que sus órdenes 
 
 La oficina puede darle instrucciones a Claude, y Claude actúa con los permisos del usuario. Por eso:
 
-* **Solo local.** El compose publica el puerto en `127.0.0.1`. No hay que exponerlo a la red ni ponerlo detrás de un proxy público.
-* **Defensa contra DNS rebinding.** Se rechaza cualquier petición cuya cabecera `Host` no sea `localhost`, `127.0.0.1` o `::1`.
+* **Dos puertos.** El panel (7777) se publica en `127.0.0.1` por defecto o en la IP del VPS (`PUBLICAR_IP`). Los hooks (7778, HTTP plano y solo `/api/hook`) se publican siempre en `127.0.0.1`.
+* **Modo VPS con contraseña.** Si el panel se publica fuera de localhost, el servidor no arranca sin `OFICINA_PASSWORD` de al menos 12 caracteres. El acceso usa una cookie de sesión aleatoria (`HttpOnly`, `SameSite=Strict`, `Secure` con HTTPS, 12 h). La contraseña solo se guarda en memoria como derivado scrypt. Tras 5 fallos en 10 min, la IP queda bloqueada 15 min, y cada fallo añade una espera.
+* **HTTPS en el VPS.** Por defecto se genera un certificado autofirmado EC P-256 para la IP o el dominio de `TLS_HOSTS`, guardado en un volumen. También se puede usar un certificado propio (`TLS=archivos`) o un proxy con HTTPS (`TLS=0` + `CONFIAR_PROXY=1`).
+* **Defensa contra DNS rebinding en modo local.** Sin contraseña, se rechaza cualquier `Host` que no sea `localhost`, `127.0.0.1` o `::1`.
 * **Hooks autenticados.** `/api/hook` exige el token (comparación en tiempo constante) y `Content-Type: application/json`. Una web maliciosa no puede enviar ese tipo de contenido a otro origen sin preflight CORS, y la oficina nunca lo concede.
-* **WebSocket solo desde la propia página.** Las órdenes viajan por `/ws`, que exige que `Origin` coincida con el host local. También tiene un límite de 40 mensajes cada 10 s y de 4000 caracteres por orden.
+* **WebSocket solo desde la propia página.** Las órdenes viajan por `/ws`, que exige sesión válida y que `Origin` coincida con el host. Al caducar la sesión, se cierra. También tiene un límite de 40 mensajes cada 10 s y de 4000 caracteres por orden.
 * **Lo que se muestra va enmascarado.** Antes de llegar al panel se recortan y ocultan claves privadas, tokens de GitHub/AWS/Slack/Anthropic/Google, JWT, `password=`, cabeceras `Authorization` y URLs con credenciales.
 * **Las órdenes no amplían permisos.** Claude las ejecuta con el sistema de permisos normal de Claude Code: si una acción requiere aprobación, la sigue pidiendo en la terminal. La oficina no aprueba ni rechaza permisos.
 * **Contenedor endurecido.** Usuario no root, sistema de archivos de solo lectura, `cap_drop: ALL`, `no-new-privileges`, límites de memoria y procesos, y `~/.claude` montado en solo lectura. Solo el paso `instalar` lo monta en escritura, y lo hace sin red.

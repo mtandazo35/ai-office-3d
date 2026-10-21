@@ -1,10 +1,12 @@
 # Oficina IA: ve tus sesiones de Claude Code en una oficina 3D y dales órdenes.
 #
-#   docker compose up -d --build          # levanta la oficina en http://127.0.0.1:7777
+#   docker compose up -d --build          # levanta la oficina
 #   docker compose run --rm instalar      # instala los hooks en ~/.claude/settings.json (una vez)
 #   AI_OFFICE_DEMO=1 docker compose up    # prueba sin Claude Code, con agentes simulados
 #
-# Ajustes opcionales en .env (ver .env.example).
+# Local (por defecto): http://127.0.0.1:7777, sin contraseña.
+# VPS: en .env pon PUBLICAR_IP=0.0.0.0 y OFICINA_PASSWORD; se abre en https://IP_DEL_VPS:7777.
+# Ver .env.example.
 
 x-endurecido: &endurecido
   read_only: true
@@ -22,15 +24,26 @@ services:
     image: ai-office-3d/oficina:local
     container_name: ai-office
     restart: unless-stopped
-    # Solo en el propio equipo: la oficina puede dar órdenes a Claude, no la expongas a la red.
     ports:
-      - "127.0.0.1:${PUERTO:-7777}:7777"
+      # Panel: 127.0.0.1 por defecto; PUBLICAR_IP=0.0.0.0 (o la IP pública) para verlo desde fuera.
+      - "${PUBLICAR_IP:-127.0.0.1}:${PUERTO:-7777}:7777"
+      # Hooks de Claude Code: siempre solo en el propio equipo.
+      - "127.0.0.1:${PUERTO_HOOKS:-7778}:7778"
     environment:
+      PUBLICAR_IP: "${PUBLICAR_IP:-127.0.0.1}"
+      OFICINA_PASSWORD: "${OFICINA_PASSWORD:-}"
+      TLS: "${TLS:-}"
+      TLS_HOSTS: "${TLS_HOSTS:-}"
+      TLS_CERT: "${TLS_CERT:-}"
+      TLS_KEY: "${TLS_KEY:-}"
+      CONFIAR_PROXY: "${CONFIAR_PROXY:-0}"
       GUARDIA_MAX_MIN: "${GUARDIA_MAX_MIN:-14}"
       AI_OFFICE_DEMO: "${AI_OFFICE_DEMO:-0}"
     volumes:
-      # Solo lectura: el token de los hooks y los transcripts (para tokens y sesiones recientes).
+      # Solo lectura: el token de los hooks y los transcripts (tokens y sesiones recientes).
       - "${CLAUDE_DIR:-${HOME}/.claude}:/claude:ro"
+      # Certificado autofirmado (se reutiliza entre reinicios).
+      - oficina-datos:/datos
     mem_limit: 256m
     pids_limit: 100
 
@@ -43,8 +56,11 @@ services:
     entrypoint: ["node", "scripts/instalar-hooks.mjs"]
     environment:
       CLAUDE_DIR: /claude
-      PUERTO: "${PUERTO:-7777}"
+      PUERTO_HOOKS: "${PUERTO_HOOKS:-7778}"
       GUARDIA_MAX_MIN: "${GUARDIA_MAX_MIN:-14}"
     volumes:
       # Lectura y escritura solo para este paso: añade los hooks a settings.json.
       - "${CLAUDE_DIR:-${HOME}/.claude}:/claude"
+
+volumes:
+  oficina-datos:

@@ -176,6 +176,10 @@ $('guardia').addEventListener('change', (ev) => {
   if (seleccion) enviar({ t: 'guardia', id: seleccion, activa: ev.target.checked });
 });
 $('btn-ayuda').addEventListener('click', () => $('ayuda').showModal());
+$('btn-salir').addEventListener('click', async () => {
+  try { await fetch('/api/salir', { method: 'POST', credentials: 'same-origin' }); } catch {}
+  location.replace('/login.html');
+});
 document.querySelector('[data-abre-ayuda]').addEventListener('click', () => $('ayuda').showModal());
 
 function enviar(msg) {
@@ -198,6 +202,7 @@ function conectar() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.t === 'snapshot') {
       sesiones.clear(); m.sesiones.forEach((s) => sesiones.set(s.id, s)); config = m.config || {};
+      $('btn-salir').hidden = !config.auth;
       if (seleccion && !sesiones.has(seleccion)) seleccion = null;
       pintarTodo();
     } else if (m.t === 'sesion') {
@@ -208,8 +213,11 @@ function conectar() {
       avisar(m.error);
     }
   });
-  ws.addEventListener('close', () => {
+  ws.addEventListener('close', async (ev) => {
     estado.dataset.estado = 'caido'; estado.lastElementChild.textContent = 'Reconectando…';
+    // Sesión caducada o cerrada: volver a la pantalla de acceso.
+    if (ev.code === 4401) { location.replace('/login.html'); return; }
+    try { const r = await fetch('/api/estado', { credentials: 'same-origin' }); if (r.status === 401) { location.replace('/login.html'); return; } } catch {}
     setTimeout(conectar, espera); espera = Math.min(espera * 2, 8000);
   });
 }
