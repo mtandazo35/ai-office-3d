@@ -68,7 +68,8 @@ class Oficina extends EventEmitter {
         id, cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
         estado: 'inactivo', herramienta: '', detalle: '', ultimoPrompt: '', ultimoMensaje: '',
         permiso: '', inicio: this.ahora(), ultimaActividad: this.ahora(),
-        tokens: { contexto: 0, salida: 0 }, subagentes: {}, ordenes: [], guardia: false, log: []
+        tokens: { contexto: 0, salida: 0 }, subagentes: {}, ordenes: [], guardia: false, log: [],
+        herramientasUsadas: 0, turnos: 0
       };
       this.sesiones.set(id, s);
     }
@@ -93,7 +94,7 @@ class Oficina extends EventEmitter {
       ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso,
       inicio: s.inicio, ultimaActividad: s.ultimaActividad, tokens: { ...s.tokens },
       subagentes: Object.values(s.subagentes).map((a) => ({ ...a })),
-      ordenes: s.ordenes.map((o) => ({ ...o })), guardia: s.guardia,
+      ordenes: s.ordenes.map((o) => ({ ...o })), guardia: s.guardia, herramientasUsadas: s.herramientasUsadas, turnos: s.turnos,
       esperandoOrden: this.esperas.has(s.id), log: s.log.slice(-MAX_LOG)
     };
   }
@@ -129,6 +130,7 @@ class Oficina extends EventEmitter {
         break;
       case 'PreToolUse': {
         const det = redactar(detalleHerramienta(ev.tool_name, ev.tool_input, s.cwd), 300);
+        s.herramientasUsadas += 1;
         if (sub) { sub.estado = 'ejecutando'; sub.herramienta = ev.tool_name || ''; sub.detalle = det; }
         else { s.herramienta = ev.tool_name || ''; s.detalle = det; s.permiso = ''; this.estado(s, 'ejecutando'); }
         this.registrar(s, 'herramienta', (sub ? '[' + sub.tipo + '] ' : '') + (ev.tool_name || '') + ' · ' + det);
@@ -178,6 +180,7 @@ class Oficina extends EventEmitter {
       case 'Stop':
         if (sub) break; // un Stop dentro de un subagente no cierra la sesión
         s.ultimoMensaje = redactar(ev.last_assistant_message, 800);
+        s.turnos += 1;
         s.herramienta = ''; s.detalle = ''; s.permiso = '';
         respuesta = this.alParar(s, ev);
         break;

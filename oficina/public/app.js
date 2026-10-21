@@ -1,6 +1,6 @@
 // Panel de la oficina: conexión WebSocket, lista de agentes, detalle y órdenes.
 // Todo el texto que viene de las sesiones se pinta con textContent (nunca innerHTML).
-import { crearEscena, COLORES, NOMBRES } from '/escena.js';
+import { crearEscena, COLORES, NOMBRES, nivelDe } from '/escena.js';
 
 const $ = (id) => document.getElementById(id);
 const sesiones = new Map();
@@ -84,19 +84,47 @@ function pintarResumen() {
   document.title = (esperando ? '(' + esperando + ') ' : '') + 'Oficina IA';
 }
 
+// La lista se actualiza en su sitio (sin reconstruir los botones) para que un clic no se pierda
+// si llega un evento justo en ese momento.
+const filas = new Map(); // id -> { li, boton, nv, proy, est, que }
 function pintarLista() {
-  const ul = $('lista'); ul.replaceChildren();
-  if (!sesiones.size) { ul.append(el('li', { class: 'l-vacia' }, 'Sin sesiones activas.')); return; }
+  const ul = $('lista');
+  const vacia = ul.querySelector('.l-vacia');
+  if (!sesiones.size) {
+    filas.forEach((f) => f.li.remove()); filas.clear();
+    if (!vacia) ul.append(el('li', { class: 'l-vacia' }, 'Sin sesiones activas.'));
+    return;
+  }
+  if (vacia) vacia.remove();
+  for (const [id, f] of filas) if (!sesiones.has(id)) { f.li.remove(); filas.delete(id); }
+  let anterior = null;
   for (const s of orden()) {
+    let f = filas.get(s.id);
+    if (!f) {
+      f = { nv: el('span', { class: 'l-nv' }), proy: el('span'), est: el('span', { class: 'l-est' }), que: el('span', { class: 'l-que' }) };
+      const id = s.id;
+      f.boton = el('button', { type: 'button', onclick: () => seleccionar(id) },
+        el('span', { class: 'l-cab' }, el('span', { class: 'l-proy' }, f.nv, f.proy), f.est), f.que);
+      f.li = el('li', {}, f.boton);
+      filas.set(s.id, f);
+    }
     const pend = s.ordenes.filter((o) => o.estado === 'pendiente').length;
-    ul.append(el('li', {},
-      el('button', { type: 'button', c: COLORES[s.estado], 'aria-current': String(s.id === seleccion), onclick: () => seleccionar(s.id) },
-        el('span', { class: 'l-cab' }, el('span', { class: 'l-proy' }, s.proyecto + (pend ? '  ✉' + pend : '')), el('span', { class: 'l-est' }, NOMBRES[s.estado] || s.estado)),
-        el('span', { class: 'l-que' }, queHace(s)))));
+    f.boton.style.setProperty('--c', COLORES[s.estado] || COLORES.inactivo);
+    f.boton.setAttribute('aria-current', String(s.id === seleccion));
+    poner(f.nv, 'Nv ' + nivelDe(s.herramientasUsadas).nivel);
+    poner(f.proy, s.proyecto + (pend ? '  ✉' + pend : ''));
+    poner(f.est, NOMBRES[s.estado] || s.estado);
+    poner(f.que, queHace(s));
+    // Orden estable: solo se mueve si no está ya en su sitio.
+    const esperado = anterior ? anterior.nextSibling : ul.firstChild;
+    if (esperado !== f.li) ul.insertBefore(f.li, esperado);
+    anterior = f.li;
   }
 }
+function poner(nodo, texto) { if (nodo.textContent !== texto) nodo.textContent = texto; }
 
 let firmaFormulario = '';
+const pintado = { ordenes: '', log: '' };
 function pintarDetalle() {
   const s = seleccion && sesiones.get(seleccion);
   $('detalle').hidden = !s;
@@ -118,12 +146,17 @@ function pintarDetalle() {
   } else if (s.estado === 'guardia') {
     ahora.append(el('span', { class: 't-tit' }, 'En guardia'), el('span', { class: 't-nota' }, 'Terminó su turno y espera una orden. Escríbela abajo y la ejecutará al momento.'));
   } else if (s.herramienta) {
-    ahora.append(el('span', { class: 't-tit' }, s.herramienta), el('span', { class: 't-det' }, s.detalle),
-      s.estado === 'ejecutando' ? null : el('span', { class: 't-nota' }, 'Última herramienta usada; ahora está ' + (NOMBRES[s.estado] || s.estado).toLowerCase() + '.'));
+    ahora.append(el('span', { class: 't-tit' }, s.herramienta), el('span', { class: 't-det' }, s.detalle));
+    if (s.estado !== 'ejecutando') ahora.append(el('span', { class: 't-nota' }, 'Última herramienta usada; ahora está ' + (NOMBRES[s.estado] || s.estado).toLowerCase() + '.'));
   } else {
     ahora.append(el('span', { class: 't-tit' }, NOMBRES[s.estado] || s.estado), el('span', { class: 't-nota' }, 'Última actividad hace ' + hace(s.ultimaActividad)));
   }
 
+  const nv = nivelDe(s.herramientasUsadas);
+  $('d-nivel').textContent = 'Nv ' + nv.nivel;
+  $('d-xp-relleno').style.setProperty('width', Math.round(nv.progreso * 100) + '%');
+  $('d-xp-barra').setAttribute('aria-valuenow', String(Math.round(nv.progreso * 100)));
+  $('d-xp-datos').textContent = (s.herramientasUsadas || 0) + ' acciones · ' + (s.turnos || 0) + ' turnos';
   $('d-ctx').textContent = miles(s.tokens.contexto);
   $('d-sal').textContent = miles(s.tokens.salida);
   $('d-ini').textContent = hace(s.inicio);
@@ -139,7 +172,8 @@ function pintarDetalle() {
   if (firma !== firmaFormulario) { $('guardia').checked = s.guardia; firmaFormulario = firma; }
   $('guardia').disabled = terminada;
   $('guardia-plazo').textContent = config.guardiaMaxMin ? 'Espera hasta ' + config.guardiaMaxMin + ' min por turno; mientras tanto la terminal queda ocupada.' : '';
-  $('d-ordenes').replaceChildren(...s.ordenes.slice().reverse().map((o) => {
+  const firmaOrd = s.id + '|' + s.ordenes.map((o) => o.id + o.estado).join(',');
+  if (firmaOrd !== pintado.ordenes) pintado.ordenes = firmaOrd, $('d-ordenes').replaceChildren(...s.ordenes.slice().reverse().map((o) => {
     const est = o.estado === 'pendiente' ? 'Pendiente · ' + hora(o.creada)
       : o.estado === 'entregada' ? 'Entregada ' + hora(o.entregada) + ' vía ' + o.via : 'Cancelada';
     return el('li', { dataset: { estado: o.estado } }, el('span', { class: 'o-texto' }, o.texto), el('span', { class: 'o-est' }, est),
@@ -148,7 +182,9 @@ function pintarDetalle() {
 
   $('d-prompt').textContent = s.ultimoPrompt || '';
   $('d-mensaje').textContent = s.ultimoMensaje || '';
-  $('d-log').replaceChildren(...s.log.slice().reverse().map((ev) =>
+  const ultimo = s.log[s.log.length - 1];
+  const firmaLog = s.id + '|' + s.log.length + '|' + (ultimo ? ultimo.ts + ultimo.texto : '');
+  if (firmaLog !== pintado.log) pintado.log = firmaLog, $('d-log').replaceChildren(...s.log.slice().reverse().map((ev) =>
     el('li', { dataset: { tipo: ev.tipo } }, el('time', {}, hora(ev.ts)), el('span', {}, ev.texto))));
 }
 

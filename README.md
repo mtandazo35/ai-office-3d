@@ -2,8 +2,9 @@
 
 Oficina virtual en 3D, en tu propio equipo, para **ver trabajar a tus sesiones de Claude Code** (terminal o VS Code) y **darles órdenes** desde el navegador.
 
-- Cada sesión es un escritorio con su avatar. El monitor muestra la herramienta y el archivo o comando en curso, y un anillo en el suelo indica el estado: trabajando, pensando, espera tu aprobación, en guardia, error o inactivo.
-- Los subagentes aparecen como drones sobre el escritorio que los lanzó.
+- **Estilo videojuego:** la oficina es un diorama con suelo de madera, ventanas cuyo cielo sigue la hora real, reloj de pared, estantería, cafetera, plantas y sombras. Cada sesión es un personaje chibi con su propio aspecto: entra por la puerta, se sienta, teclea, levanta la mano cuando pide permiso, se rasca la cabeza al pensar y se va al cerrar la sesión.
+- **Efectos:** código flotando del monitor mientras trabaja, confeti al completar un turno, bocadillos («…», «?», «!», «Zz»), «¡Orden recibida!» y subidas de nivel. Cada agente sube de nivel según las acciones que hace, con su barra de XP. Los subagentes son robots ayudantes que vuelan alrededor de su escritorio.
+- El monitor de cada escritorio muestra la herramienta y el archivo o comando en curso, y el anillo del suelo indica el estado: trabajando, pensando, espera tu aprobación, en guardia, error o inactivo.
 - Al pulsar un escritorio ves el detalle: permiso pendiente, contexto y tokens, último prompt y respuesta, y registro de actividad.
 - **Órdenes:** las escribes en el panel y Claude las recibe en su siguiente paso. Con el **modo guardia**, el agente se queda esperando órdenes de la oficina al terminar su turno.
 
@@ -16,10 +17,8 @@ Requisitos: Docker con Compose y una versión reciente de Claude Code (con hooks
 ```bash
 git clone https://github.com/mtandazo35/ai-office-3d && cd ai-office-3d
 cp .env.example .env
-echo "UID_GID=$(id -u):$(id -g)" >> .env            # el usuario que usa Claude Code en el VPS
-echo "PUBLICAR_IP=0.0.0.0" >> .env
-echo "OFICINA_PASSWORD=$(openssl rand -base64 24)" >> .env
-echo "TLS_HOSTS=$(curl -s https://ifconfig.me)" >> .env   # IP pública para el certificado
+# Usuario que usa Claude Code en el VPS, acceso desde la IP, contraseña aleatoria e IP pública para el certificado:
+sed -i "s|^UID_GID=.*|UID_GID=$(id -u):$(id -g)|; s|^PUBLICAR_IP=.*|PUBLICAR_IP=0.0.0.0|; s|^OFICINA_PASSWORD=.*|OFICINA_PASSWORD=$(openssl rand -base64 24)|; s|^TLS_HOSTS=.*|TLS_HOSTS=$(curl -s https://ifconfig.me)|" .env
 
 docker compose up -d --build
 docker compose run --rm instalar                     # añade los hooks a ~/.claude/settings.json (una vez)

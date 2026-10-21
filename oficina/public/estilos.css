@@ -173,3 +173,12 @@ code { font-size: .92em; background: var(--panel-2); padding: 1px 5px; border-ra
 #f-login input { background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px 12px; }
 #f-login input:focus { border-color: var(--lila); outline: none; }
 .error { color: var(--rojo); font-size: 13.5px; min-height: 1.2em; }
+
+/* Nivel y experiencia (estilo videojuego) */
+.xp { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
+.xp-nivel { grid-row: span 2; font: 900 15px var(--mono); color: #1b1b1b; background: linear-gradient(180deg, #ffe08a, #f4a261); border: 2px solid #b5651d; border-radius: 9px; padding: 6px 9px; box-shadow: 0 2px 0 #7a3e10; }
+.xp-barra { height: 12px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+.xp-barra i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #2ee59d, #4ea1ff); border-radius: 999px; transition: width .6s ease; }
+.xp-datos { font: 12px var(--mono); color: var(--muted); }
+.lista .l-nv { font: 800 11px var(--mono); color: #1b1b1b; background: #ffd166; border-radius: 5px; padding: 1px 5px; margin-right: 7px; vertical-align: 1px; }
+@media (prefers-reduced-motion: reduce) { .xp-barra i { transition: none; } }
