@@ -1,0 +1,751 @@
+<title>Mis agentes en 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: sala de control. Panel de mando a la izquierda, escena WebGL ocupando el resto.
+     Tema único y deliberadamente oscuro (es una escena 3D): colores explícitos. */
+  :root {
+    --bg: #0b0f17;
+    --panel: #111826;
+    --panel-2: #182236;
+    --line: #243049;
+    --fg: #e6ecf5;
+    --muted: #8a97ad;
+    --n1: #3ddc97;
+    --n2: #4ea1ff;
+    --n3: #ffb545;
+    --n4: #ff5e7a;
+    --coord: #c9a6ff;
+    --ok: #3ddc97;
+    --obs: #ffb545;
+    --corr: #ff8a3d;
+    --blk: #ff4d6d;
+    --font-ui: "Barlow", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui);
+    font-size: 15px; line-height: 1.45; overflow: hidden;
+  }
+  #app {
+    display: grid; grid-template-columns: 380px 1fr; height: 100%; min-height: 0;
+  }
+  #panel {
+    background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; min-width: 0;
+    padding-block: 18px 28px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: 16px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  #escena { position: relative; min-width: 0; min-height: 0; }
+  #escena canvas { display: block; width: 100%; height: 100%; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: .01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 8px;
+  }
+  section { display: flex; flex-direction: column; gap: 8px; }
+  .niveles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .nivel {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--fg);
+    padding: 8px 6px; cursor: pointer; font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+    text-align: center; transition: border-color .15s, background .15s;
+  }
+  .nivel small { display: block; font-family: var(--font-ui); font-weight: 500; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .nivel[aria-pressed="true"] { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+  .nivel[aria-pressed="true"] small { color: var(--fg); }
+  .nivel:focus-visible, .chip:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--n2); outline-offset: 2px; }
+  .nivel-desc { font-size: 13px; color: var(--muted); margin: 0; }
+  .nivel-desc b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+    padding: 4px 10px; font-size: 13px; cursor: pointer; transition: all .15s;
+  }
+  .chip[aria-pressed="true"] { color: var(--fg); border-color: var(--coord); background: #241f3a; }
+  .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fila label { font-size: 13px; color: var(--muted); }
+  select, input[type=range] { accent-color: var(--coord); }
+  select {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 8px; font-family: var(--font-ui); font-size: 14px; flex: 1; min-width: 0;
+  }
+  .btn {
+    background: var(--coord); color: #140b2a; border: 0; border-radius: 6px; padding: 10px 14px;
+    font-family: var(--font-ui); font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .btn.sec { background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+  .acciones .btn { flex: 1 1 auto; }
+  #etapa {
+    background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--etapa-c, var(--coord));
+    border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  }
+  #etapa-nombre { font-family: var(--font-mono); font-weight: 600; font-size: 14px; margin: 0; }
+  #etapa-tag { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .08em; }
+  #etapa-texto { margin: 0; font-size: 14px; }
+  #etapa-lista { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  #etapa-lista li { display: flex; gap: 8px; align-items: flex-start; }
+  #etapa-lista li::before { content: "[ ]"; font-family: var(--font-mono); color: var(--muted); flex: none; }
+  #etapa-lista li.ok::before { content: "[x]"; color: var(--ok); }
+  #etapa-lista li.na { color: var(--muted); }
+  #etapa-lista li.na::before { content: "[–]"; }
+  #pasos { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 12.5px; }
+  #pasos li { display: flex; gap: 6px; align-items: center; color: var(--muted); font-family: var(--font-mono); min-width: 0; }
+  #pasos li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pasos li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+  #pasos li.hecho { color: var(--fg); } #pasos li.hecho::before { background: var(--lvl, var(--coord)); }
+  #pasos li.activo { color: var(--fg); font-weight: 600; } #pasos li.activo::before { background: #fff; box-shadow: 0 0 8px var(--lvl, #fff); }
+  #pasos li.salta { text-decoration: line-through; opacity: .6; }
+  #leyenda { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12.5px; color: var(--muted); }
+  #leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  .pie { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
+  #hud {
+    position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  #hud .btn { padding: 6px 10px; font-size: 13px; }
+  #ayuda {
+    position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: 12px; font-size: 12px; color: var(--muted);
+    background: rgba(11,15,23,.7); padding: 6px 10px; border-radius: 6px; pointer-events: none;
+  }
+  @media (max-width: 860px) {
+    body { overflow: auto; }
+    #app { grid-template-columns: 1fr; grid-template-rows: 56vh auto; height: auto; min-height: 100%; }
+    #escena { order: -1; height: 56vh; }
+    #panel { border-right: 0; border-top: 1px solid var(--line); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+    #pasos { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nivel, .chip { transition: none; }
+  }
+</style>
+
+<div id="app">
+  <aside id="panel">
+    <header>
+      <h1>Mis agentes en 3D</h1>
+      <p class="sub">Un cambio entra por la izquierda y recorre el modelo multiagente hasta producción. El Coordinador flota y baja a las etapas que son suyas.</p>
+    </header>
+
+    <section>
+      <p class="eyebrow">1 · Clasificar el cambio por radio de daño</p>
+      <div class="niveles" role="group" aria-label="Nivel del cambio">
+        <button class="nivel" style="--c:var(--n1)" data-n="1" aria-pressed="false">N1<small>Cosmético</small></button>
+        <button class="nivel" style="--c:var(--n2)" data-n="2" aria-pressed="false">N2<small>Funcional</small></button>
+        <button class="nivel" style="--c:var(--n3)" data-n="3" aria-pressed="true">N3<small>Sensible</small></button>
+        <button class="nivel" style="--c:var(--n4)" data-n="4" aria-pressed="false">N4<small>Compartido</small></button>
+      </div>
+      <p class="nivel-desc" id="nivel-desc"></p>
+    </section>
+
+    <section>
+      <p class="eyebrow">2 · Qué toca el cambio (activa especialistas)</p>
+      <div class="chips" id="chips" role="group" aria-label="Áreas que toca el cambio">
+        <button class="chip" data-k="estructura" aria-pressed="false">estructura / servicios</button>
+        <button class="chip" data-k="interfaz" aria-pressed="false">interfaz</button>
+        <button class="chip" data-k="cliente" aria-pressed="false">cliente / estado</button>
+        <button class="chip" data-k="logica" aria-pressed="true">lógica / endpoints</button>
+        <button class="chip" data-k="datos" aria-pressed="true">esquema / migraciones</button>
+        <button class="chip" data-k="permisos" aria-pressed="false">entrada de usuario / permisos</button>
+        <button class="chip" data-k="despliegue" aria-pressed="false">despliegue / red / secretos</button>
+        <button class="chip" data-k="negocio" aria-pressed="true">reglas del negocio</button>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">3 · Qué encuentra la auditoría</p>
+      <div class="fila">
+        <label for="hallazgo">Hallazgo</label>
+        <select id="hallazgo">
+          <option value="ninguno">Ninguno · APROBADO</option>
+          <option value="medio" selected>Medio, documentado · CON OBSERVACIONES</option>
+          <option value="alto">Alto · REQUIERE CORRECCIONES (vuelve atrás)</option>
+          <option value="critico">Crítico · BLOQUEADO</option>
+        </select>
+      </div>
+      <div class="fila">
+        <label for="velocidad">Velocidad</label>
+        <input id="velocidad" type="range" min="0.5" max="3" step="0.25" value="1" style="flex:1">
+        <span id="vel-txt" style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">1×</span>
+      </div>
+      <div class="acciones">
+        <button class="btn" id="lanzar">Lanzar cambio</button>
+        <button class="btn sec" id="pausar" disabled>Pausar</button>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">Etapa actual</p>
+      <div id="etapa">
+        <span id="etapa-tag">EN ESPERA</span>
+        <p id="etapa-nombre">Sin cambio en curso</p>
+        <p id="etapa-texto">Elige nivel, marca qué toca el cambio y pulsa «Lanzar cambio». Arrastra en la escena para girar la cámara; rueda o pellizco para acercar.</p>
+        <ul id="etapa-lista"></ul>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">Recorrido</p>
+      <ol id="pasos"></ol>
+    </section>
+
+    <section>
+      <p class="eyebrow">Leyenda</p>
+      <div id="leyenda">
+        <span><i style="background:var(--coord)"></i>Coordinador</span>
+        <span><i style="background:#fff"></i>Especialista activo</span>
+        <span><i style="background:var(--n1)"></i>N1 cosmético</span>
+        <span><i style="background:var(--n2)"></i>N2 funcional</span>
+        <span><i style="background:var(--n3)"></i>N3 sensible</span>
+        <span><i style="background:var(--n4)"></i>N4 compartido</span>
+        <span><i style="background:var(--corr)"></i>Vuelta a correcciones</span>
+        <span><i style="background:var(--blk)"></i>Bloqueado</span>
+      </div>
+    </section>
+
+    <p class="pie">Regla que manda: el proceso existe para encontrar defectos. Si un paso no ha encontrado nunca nada, sobra. Ante la duda, sube de nivel.</p>
+  </aside>
+
+  <div id="escena">
+    <canvas id="c" aria-label="Escena 3D del flujo multiagente"></canvas>
+    <div id="hud">
+      <button class="btn sec" id="ver-todo">Ver todo</button>
+      <button class="btn sec" id="seguir" aria-pressed="true">Seguir el cambio: sí</button>
+    </div>
+    <div id="ayuda">arrastrar = girar · rueda / pellizco = zoom</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var REDUCIDO = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- Datos del modelo ----------
+  var NIVELES = {
+    1: { nombre: 'N1 · Cosmético', color: 0x3ddc97, css: 'var(--n1)', que: 'si se equivoca, alguien ve algo feo', ej: 'textos, estilos, orden de bloques, documentación' },
+    2: { nombre: 'N2 · Funcional', color: 0x4ea1ff, css: 'var(--n2)', que: 'si se equivoca, una función da un resultado erróneo', ej: 'lógica de negocio, informes, filtros, API interna' },
+    3: { nombre: 'N3 · Sensible', color: 0xffb545, css: 'var(--n3)', que: 'si se equivoca, hay pérdida, exposición o corte de servicio', ej: 'autenticación, permisos, datos, migraciones, dinero, cortes a clientes' },
+    4: { nombre: 'N4 · Recurso compartido', color: 0xff5e7a, css: 'var(--n4)', que: 'afecta a infraestructura o datos de terceros', ej: 'routers y firewalls de un cliente, DNS público, sistemas de otra organización' }
+  };
+
+  var ESPECIALISTAS = [
+    { id: 'arq', nombre: 'Arquitectura', activo: function (n, c) { return c.estructura; } },
+    { id: 'ux', nombre: 'UI/UX', activo: function (n, c) { return c.interfaz; } },
+    { id: 'front', nombre: 'Frontend', activo: function (n, c) { return c.cliente; } },
+    { id: 'back', nombre: 'Backend', activo: function (n, c) { return c.logica; } },
+    { id: 'bd', nombre: 'Base de datos', activo: function (n, c) { return c.datos; } },
+    { id: 'seg', nombre: 'Seguridad', activo: function (n, c) { return n >= 3 || (n === 2 && c.permisos); } },
+    { id: 'devops', nombre: 'DevOps', activo: function (n, c) { return c.despliegue; } },
+    { id: 'qa', nombre: 'QA', activo: function (n) { return n >= 2; } },
+    { id: 'dom', nombre: 'Dominio', activo: function (n, c) { return c.negocio; } }
+  ];
+
+  var CHECK = {
+    1: ['Validación automática en verde', 'Cambio clasificado (N1..N4) y anotado', 'Se sabe cómo revertir'],
+    2: ['Prueba de comportamiento que falla sin el arreglo', 'Revisión cruzada realizada (por quién)', 'Caso vacío y caso degradado cubiertos', 'Documentación de la propia aplicación actualizada'],
+    3: ['Seguridad auditada (con alcance real)', 'Dependencias revisadas', 'Respaldo verificado ANTES de tocar', 'Restauración probada, no supuesta', 'Rollback escrito y ejecutable', 'Secretos fuera del código y del historial', 'Logs y alertas cubren el fallo nuevo', 'Autorización humana explícita'],
+    4: ['Respaldo del sistema ajeno (export/snapshot)', 'Autorización del dueño del recurso', 'Vuelta atrás probada antes de aplicar', 'Ventana acordada y aviso enviado']
+  };
+
+  var ESTACIONES = [
+    { id: 'cambio', nombre: 'CAMBIO', x: -32,
+      texto: function () { return 'Llega una petición. Nadie trabaja todavía: lo primero es saber cuánto vale este cambio, para no gastar en un texto lo que hace falta para una migración.'; } },
+    { id: 'clasificar', nombre: 'CLASIFICAR', x: -25, coord: true,
+      texto: function (n) { return 'El Coordinador lo deja escrito como ' + NIVELES[n].nombre + ': ' + NIVELES[n].que + '. Ejemplos: ' + NIVELES[n].ej + '. Ante la duda, sube de nivel.'; } },
+    { id: 'desarrollo', nombre: 'DESARROLLO', x: -14, coord: true, anillo: true, dwell: 3.4,
+      texto: function (n, c, act) {
+        if (!act.length) return 'Cambio cosmético sin áreas especiales: lo hace el autor y pasa directo a la validación automática.';
+        return 'El Coordinador divide el trabajo y asigna a ' + act.join(', ') + '. Cada uno responde por escrito: ¿qué es lo peor que puede pasar en mi área y cómo comprobé que no pasa?';
+      } },
+    { id: 'validacion', nombre: 'VALIDACIÓN AUTOMÁTICA', x: -4,
+      texto: function (n) { return 'Un único comando que falla en rojo: sintaxis, linters, pruebas y comprobaciones del proyecto.' + (n >= 2 ? ' Incluye la prueba de comportamiento que fallaba antes del arreglo y que vive en el repositorio.' : '') + ' Si no corre en cada cambio, no existe.'; } },
+    { id: 'cruzada', nombre: 'REVISIÓN CRUZADA', x: 3, aplica: function (n) { return n >= 2; },
+      texto: function () { return 'Una revisión, no todas. La independencia es real si viene de otro agente, de una herramienta que no comparte los supuestos del autor, del sistema real o del usuario. Si no existe, se dice en el informe.'; },
+      salta: 'En N1 basta la revisión del autor.' },
+    { id: 'qa', nombre: 'QA + SEGURIDAD', x: 9, aplica: function (n) { return n >= 2; },
+      texto: function (n, c) { return n >= 3 ? 'QA con pruebas negativas y Seguridad con alcance real, no teórico: desde dónde se llega de verdad al problema. Un fallo silencioso sube de severidad.' : ('QA desde N2: caso vacío, caso degradado y el caso de que ya está arreglado.' + (c.permisos ? ' Seguridad entra porque hay entrada de usuario o permisos.' : ' Seguridad no se activa en N2 si no hay entrada de usuario ni permisos.')); },
+      salta: 'N1 no lleva QA ni Seguridad.' },
+    { id: 'respaldo', nombre: 'RESPALDO Y ROLLBACK', x: 15, aplica: function (n) { return n >= 3; },
+      texto: function (n) { return n === 4 ? 'Respaldo verificado del sistema propio y export o snapshot del sistema ajeno. El comando de vuelta atrás se prueba antes de aplicar, no después.' : 'Respaldo verificado antes de tocar, restauración probada y plan de rollback escrito y ejecutable.'; },
+      salta: 'N1 y N2: basta saber cómo revertir; el despliegue lleva su rollback.' },
+    { id: 'autorizacion', nombre: 'AUTORIZACIÓN', x: 21, aplica: function (n) { return n >= 3; },
+      texto: function (n) { return n === 4 ? 'Autoriza quien es dueño del recurso. Ventana acordada y aviso enviado.' : 'Autorización humana explícita. La duda no se resuelve desplegando.'; },
+      salta: 'Sin autorización formal por debajo de N3.' },
+    { id: 'auditoria', nombre: 'AUDITORÍA DEL COORDINADOR', x: 28, coord: true, dwell: 3.4, check: true,
+      texto: function (n) { return 'Exige evidencia, no afirmaciones: un hallazgo sin reproducción es una hipótesis. Detecta contradicciones entre entregas y repite solo las verificaciones afectadas.' + (n >= 3 ? ' Emite informe final por escrito.' : ' En N2 basta el registro del cambio con su evidencia.'); } },
+    { id: 'estado', nombre: 'ESTADO', x: 35, pads: true },
+    { id: 'produccion', nombre: 'PRODUCCIÓN', x: 42,
+      texto: function (n) { return n === 1 ? 'Despliegue directo. Si rompe algo, se revierte.' : 'Despliegue con rollback a mano. Nada va a producción sin saber cómo volver atrás.'; } },
+    { id: 'observacion', nombre: 'OBSERVACIÓN', x: 48, aplica: function (n) { return n >= 2; },
+      texto: function () { return 'Qué observar y durante cuánto (una métrica concreta), qué señal dispara la vuelta atrás y quién mira. Un despliegue que nadie observa se descubre roto por un usuario.'; },
+      salta: 'N1 no exige ventana de observación.' }
+  ];
+
+  var PADS = [
+    { id: 'aprobado', nombre: 'APROBADO', z: -5.4, color: 0x3ddc97, css: 'var(--ok)', texto: 'Controles superados, sin hallazgos críticos ni altos abiertos.' },
+    { id: 'obs', nombre: 'CON OBSERVACIONES', z: -1.8, color: 0xffb545, css: 'var(--obs)', texto: 'Solo hallazgos medios o bajos, documentados y con tarea creada. Se puede desplegar.' },
+    { id: 'correcciones', nombre: 'REQUIERE CORRECCIONES', z: 1.8, color: 0xff8a3d, css: 'var(--corr)', texto: 'Hallazgo alto: vuelve al especialista. Se repiten las verificaciones afectadas y las que dependen de ellas.' },
+    { id: 'bloqueado', nombre: 'BLOQUEADO', z: 5.4, color: 0xff4d6d, css: 'var(--blk)', texto: 'Existe al menos una condición crítica. Bloquea producción. La duda no se resuelve desplegando.' }
+  ];
+
+  // ---------- Estado de la UI ----------
+  var nivel = 3;
+  var chips = { estructura: false, interfaz: false, cliente: false, logica: true, datos: true, permisos: false, despliegue: false, negocio: true };
+  var velocidad = 1;
+  var seguir = true;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function activosNombres() {
+    return ESPECIALISTAS.filter(function (e) { return e.activo(nivel, chips); }).map(function (e) { return e.nombre; });
+  }
+
+  function pintarNivel() {
+    var N = NIVELES[nivel];
+    $('nivel-desc').innerHTML = '<b>' + N.nombre + '</b>: ' + N.que + '. Ejemplos: ' + N.ej + '.';
+    document.documentElement.style.setProperty('--lvl', N.css);
+    document.querySelectorAll('.nivel').forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.n === nivel)); });
+  }
+
+  document.querySelectorAll('.nivel').forEach(function (b) {
+    b.addEventListener('click', function () { nivel = +b.dataset.n; pintarNivel(); refrescarAnillo(); pintarPlan(); });
+  });
+  document.querySelectorAll('.chip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      chips[b.dataset.k] = !chips[b.dataset.k];
+      b.setAttribute('aria-pressed', String(chips[b.dataset.k]));
+      refrescarAnillo(); pintarPlan();
+    });
+  });
+  $('velocidad').addEventListener('input', function (e) { velocidad = +e.target.value; $('vel-txt').textContent = velocidad + '×'; });
+  $('hallazgo').addEventListener('change', pintarPlan);
+  $('seguir').addEventListener('click', function () {
+    seguir = !seguir;
+    $('seguir').setAttribute('aria-pressed', String(seguir));
+    $('seguir').textContent = 'Seguir el cambio: ' + (seguir ? 'sí' : 'no');
+  });
+  $('ver-todo').addEventListener('click', function () { seguir = false; $('seguir').setAttribute('aria-pressed', 'false'); $('seguir').textContent = 'Seguir el cambio: no'; cam.dist = 78; cam.phi = 1.02; cam.theta = 0.35; });
+
+  // ---------- Escena ----------
+  var canvas = $('c');
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0f17);
+  scene.fog = new THREE.Fog(0x0b0f17, 60, 150);
+  var camera = new THREE.PerspectiveCamera(50, 1, 0.1, 400);
+
+  scene.add(new THREE.HemisphereLight(0x8aa4d6, 0x0b0f17, 0.75));
+  var sol = new THREE.DirectionalLight(0xffffff, 0.7); sol.position.set(20, 40, 25); scene.add(sol);
+  var grid = new THREE.GridHelper(220, 110, 0x243049, 0x182236); grid.position.y = -0.01; scene.add(grid);
+
+  // Suelo tenue para que el grid no "flote"
+  var suelo = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshStandardMaterial({ color: 0x0d1220, roughness: 1 }));
+  suelo.rotation.x = -Math.PI / 2; suelo.position.y = -0.02; scene.add(suelo);
+
+  function etiqueta(texto, opts) {
+    opts = opts || {};
+    var fs = opts.fs || 40, pad = 24;
+    var cv = document.createElement('canvas');
+    var ctx = cv.getContext('2d');
+    ctx.font = '600 ' + fs + 'px "JetBrains Mono", Consolas, monospace';
+    var w = Math.ceil(ctx.measureText(texto).width) + pad * 2;
+    var sub = opts.sub ? Math.max(w, Math.ceil(ctx.measureText(opts.sub).width) + pad * 2) : w;
+    cv.width = Math.max(64, sub); cv.height = opts.sub ? fs * 2.6 : fs * 1.8;
+    ctx = cv.getContext('2d');
+    if (opts.fondo !== false) {
+      ctx.fillStyle = 'rgba(17,24,38,0.82)';
+      ctx.beginPath();
+      var r = 14; ctx.moveTo(r, 0); ctx.lineTo(cv.width - r, 0); ctx.quadraticCurveTo(cv.width, 0, cv.width, r);
+      ctx.lineTo(cv.width, cv.height - r); ctx.quadraticCurveTo(cv.width, cv.height, cv.width - r, cv.height);
+      ctx.lineTo(r, cv.height); ctx.quadraticCurveTo(0, cv.height, 0, cv.height - r); ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.fill();
+    }
+    ctx.font = '600 ' + fs + 'px "JetBrains Mono", Consolas, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = opts.color || '#e6ecf5';
+    ctx.fillText(texto, cv.width / 2, opts.sub ? fs * 0.95 : cv.height / 2);
+    if (opts.sub) {
+      ctx.font = '400 ' + (fs * 0.72) + 'px "Barlow", "Segoe UI", sans-serif';
+      ctx.fillStyle = '#8a97ad';
+      ctx.fillText(opts.sub, cv.width / 2, fs * 1.95);
+    }
+    var tex = new THREE.CanvasTexture(cv);
+    tex.minFilter = THREE.LinearFilter; tex.encoding = THREE.sRGBEncoding;
+    var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    var esc = opts.escala || 0.012;
+    sp.scale.set(cv.width * esc, cv.height * esc, 1);
+    return sp;
+  }
+
+  // Estaciones
+  var estMesh = {};
+  ESTACIONES.forEach(function (st) {
+    var g = new THREE.Group(); g.position.set(st.x, 0, 0);
+    if (!st.pads) {
+      var base = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.1, 0.35, 40),
+        new THREE.MeshStandardMaterial({ color: 0x1b2538, roughness: 0.7, metalness: 0.2, emissive: 0x000000 }));
+      base.position.y = 0.175; g.add(base);
+      var aro = new THREE.Mesh(new THREE.TorusGeometry(2.25, 0.07, 10, 60),
+        new THREE.MeshBasicMaterial({ color: 0x2e3b58 }));
+      aro.rotation.x = Math.PI / 2; aro.position.y = 0.36; g.add(aro);
+      var lab = etiqueta(st.nombre, { fs: 36 }); lab.position.y = 3.2; g.add(lab);
+      st.m = { base: base, aro: aro, lab: lab, g: g, pos: new THREE.Vector3(st.x, 0.8, 0) };
+    } else {
+      st.m = { g: g, pads: {} };
+      var labE = etiqueta('ESTADO', { fs: 36 }); labE.position.y = 4.6; g.add(labE);
+      PADS.forEach(function (p) {
+        var pg = new THREE.Group(); pg.position.set(0, 0, p.z);
+        var pb = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.4, 0.3, 32),
+          new THREE.MeshStandardMaterial({ color: 0x1b2538, roughness: 0.7, metalness: 0.2, emissive: p.color, emissiveIntensity: 0.08 }));
+        pb.position.y = 0.15; pg.add(pb);
+        var pa = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.06, 8, 48), new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.45 }));
+        pa.rotation.x = Math.PI / 2; pa.position.y = 0.31; pg.add(pa);
+        var pl = etiqueta(p.nombre, { fs: 26, escala: 0.011, color: '#' + p.color.toString(16).padStart(6, '0') }); pl.position.y = 1.7; pg.add(pl);
+        pg.userData = { base: pb, aro: pa, pos: new THREE.Vector3(st.x, 0.8, p.z) };
+        st.m.pads[p.id] = pg; g.add(pg);
+      });
+    }
+    scene.add(g);
+    estMesh[st.id] = st;
+  });
+
+  // Camino principal
+  var puntos = ESTACIONES.map(function (st) { return new THREE.Vector3(st.x, 0.36, 0); });
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(puntos), new THREE.LineBasicMaterial({ color: 0x3a4a6e })));
+  // Ramas a los pads
+  var estX = estMesh.estado.x, audX = estMesh.auditoria.x, prodX = estMesh.produccion.x;
+  PADS.forEach(function (p) {
+    var pts = [new THREE.Vector3(audX, 0.36, 0), new THREE.Vector3(estX, 0.36, p.z), new THREE.Vector3(prodX, 0.36, 0)];
+    if (p.id === 'bloqueado') pts.pop();
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x3a4a6e, transparent: true, opacity: 0.6 })));
+  });
+  // Curva de vuelta a correcciones
+  var curvaVuelta = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(estX, 0.8, 1.8), new THREE.Vector3((estX + estMesh.desarrollo.x) / 2, 11, 11), new THREE.Vector3(estMesh.desarrollo.x, 0.8, 0));
+  var lv = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curvaVuelta.getPoints(60)),
+    new THREE.LineDashedMaterial({ color: 0xff8a3d, dashSize: 0.8, gapSize: 0.5, transparent: true, opacity: 0.55 }));
+  lv.computeLineDistances(); scene.add(lv);
+
+  // Anillo de especialistas alrededor de DESARROLLO
+  var centroAnillo = new THREE.Vector3(estMesh.desarrollo.x, 0, 0);
+  var radioAnillo = 6.2;
+  ESPECIALISTAS.forEach(function (e, i) {
+    var ang = -Math.PI / 2 + (i / ESPECIALISTAS.length) * Math.PI * 2;
+    var g = new THREE.Group();
+    g.position.set(centroAnillo.x + Math.cos(ang) * radioAnillo, 0, Math.sin(ang) * radioAnillo);
+    var ped = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 0.25, 24), new THREE.MeshStandardMaterial({ color: 0x182236, roughness: 0.8 }));
+    ped.position.y = 0.125; g.add(ped);
+    var cuerpo = new THREE.Mesh(new THREE.IcosahedronGeometry(0.62, 0),
+      new THREE.MeshStandardMaterial({ color: 0x3a4a6e, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.35, metalness: 0.3 }));
+    cuerpo.position.y = 1.2; g.add(cuerpo);
+    var lab = etiqueta(e.nombre, { fs: 28, escala: 0.011 }); lab.position.y = 2.5; g.add(lab);
+    e.m = { g: g, cuerpo: cuerpo, lab: lab, ped: ped, fase: Math.random() * 6 };
+    scene.add(g);
+  });
+
+  // Coordinador
+  var coord = new THREE.Group();
+  var coordCuerpo = new THREE.Mesh(new THREE.OctahedronGeometry(1.4, 0),
+    new THREE.MeshStandardMaterial({ color: 0xc9a6ff, emissive: 0xc9a6ff, emissiveIntensity: 0.55, roughness: 0.3, metalness: 0.4 }));
+  coord.add(coordCuerpo);
+  var coordAro = new THREE.Mesh(new THREE.TorusGeometry(2.1, 0.05, 8, 64), new THREE.MeshBasicMaterial({ color: 0xc9a6ff, transparent: true, opacity: 0.6 }));
+  coordAro.rotation.x = Math.PI / 2; coord.add(coordAro);
+  var coordLab = etiqueta('COORDINADOR', { fs: 32, sub: 'clasifica · asigna · audita · cierra', color: '#c9a6ff' }); coordLab.position.y = 2.9; coord.add(coordLab);
+  var luzCoord = new THREE.PointLight(0xc9a6ff, 0.9, 30); coord.add(luzCoord);
+  coord.position.set(0, 9, 0); scene.add(coord);
+  var coordDestino = new THREE.Vector3(0, 9, 0);
+
+  // Haces del coordinador (un haz principal y hasta 9 de asignación)
+  function hazNuevo(color) {
+    var geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    var l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0 }));
+    scene.add(l); return l;
+  }
+  function hazPoner(l, a, b, op) {
+    var arr = l.geometry.attributes.position.array;
+    arr[0] = a.x; arr[1] = a.y; arr[2] = a.z; arr[3] = b.x; arr[4] = b.y; arr[5] = b.z;
+    l.geometry.attributes.position.needsUpdate = true; l.material.opacity = op;
+  }
+  var hazPrincipal = hazNuevo(0xc9a6ff);
+  var hacesAsig = ESPECIALISTAS.map(function () { return hazNuevo(0xc9a6ff); });
+
+  // El cambio
+  var cambio = new THREE.Group();
+  var cambioMat = new THREE.MeshStandardMaterial({ color: 0xffb545, emissive: 0xffb545, emissiveIntensity: 0.9, roughness: 0.3 });
+  var cambioCuerpo = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 24), cambioMat);
+  cambio.add(cambioCuerpo);
+  var luzCambio = new THREE.PointLight(0xffb545, 1.2, 14); cambio.add(luzCambio);
+  var cambioLab = etiqueta('cambio', { fs: 26, escala: 0.011, fondo: false }); cambioLab.position.y = 1.2; cambio.add(cambioLab);
+  cambio.position.copy(estMesh.cambio.m.pos); cambio.visible = true; scene.add(cambio);
+
+  // Estela
+  var estelaN = 40, estelaPts = [];
+  for (var i = 0; i < estelaN; i++) estelaPts.push(cambio.position.clone());
+  var estela = new THREE.Line(new THREE.BufferGeometry().setFromPoints(estelaPts), new THREE.LineBasicMaterial({ color: 0xffb545, transparent: true, opacity: 0.5 }));
+  scene.add(estela);
+
+  // ---------- Cámara orbital propia ----------
+  var cam = { theta: 0.55, phi: 1.1, dist: 42, target: new THREE.Vector3(-10, 1.5, 0) };
+  var objetivoDeseado = new THREE.Vector3(-10, 1.5, 0);
+  var punteros = {}; var pinchDist = 0;
+  canvas.addEventListener('pointerdown', function (e) { punteros[e.pointerId] = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!punteros[e.pointerId]) return;
+    var ids = Object.keys(punteros);
+    if (ids.length === 1) {
+      var p = punteros[e.pointerId];
+      cam.theta -= (e.clientX - p.x) * 0.006; cam.phi -= (e.clientY - p.y) * 0.006;
+      cam.phi = Math.max(0.25, Math.min(1.5, cam.phi));
+    }
+    punteros[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (ids.length === 2) {
+      var a = punteros[ids[0]], b = punteros[ids[1]];
+      var d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDist) { cam.dist *= pinchDist / d; cam.dist = Math.max(10, Math.min(130, cam.dist)); }
+      pinchDist = d;
+    }
+  });
+  function soltar(e) { delete punteros[e.pointerId]; pinchDist = 0; }
+  canvas.addEventListener('pointerup', soltar); canvas.addEventListener('pointercancel', soltar);
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); cam.dist *= 1 + e.deltaY * 0.0012; cam.dist = Math.max(10, Math.min(130, cam.dist)); }, { passive: false });
+
+  function ajustarTamano() {
+    var w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  if (window.ResizeObserver) new ResizeObserver(ajustarTamano).observe($('escena')); else window.addEventListener('resize', ajustarTamano);
+  ajustarTamano();
+
+  // ---------- Visuales de estado ----------
+  var colorNivel = new THREE.Color(NIVELES[nivel].color);
+  function setEstacion(st, estado) {
+    if (st.pads) return;
+    var m = st.m;
+    if (estado === 'activo') { m.base.material.emissive.copy(colorNivel); m.base.material.emissiveIntensity = 0.35; m.aro.material.color.copy(colorNivel); m.lab.material.opacity = 1; }
+    else if (estado === 'hecho') { m.base.material.emissive.copy(colorNivel); m.base.material.emissiveIntensity = 0.12; m.aro.material.color.copy(colorNivel).multiplyScalar(0.6); m.lab.material.opacity = 0.9; }
+    else if (estado === 'salta') { m.base.material.emissiveIntensity = 0; m.aro.material.color.set(0x1f283c); m.lab.material.opacity = 0.35; }
+    else { m.base.material.emissiveIntensity = 0; m.aro.material.color.set(0x2e3b58); m.lab.material.opacity = 0.8; }
+  }
+  function setPad(id, estado) {
+    var pg = estMesh.estado.m.pads[id]; var p = PADS.filter(function (x) { return x.id === id; })[0];
+    pg.userData.base.material.emissiveIntensity = estado === 'activo' ? 0.6 : 0.08;
+    pg.userData.aro.material.opacity = estado === 'activo' ? 1 : 0.45;
+    pg.userData.base.material.emissive.set(p.color);
+  }
+  function refrescarAnillo() {
+    ESPECIALISTAS.forEach(function (e) {
+      var on = e.activo(nivel, chips);
+      e.m.activo = on;
+      e.m.cuerpo.material.color.set(on ? 0xffffff : 0x3a4a6e);
+      e.m.cuerpo.material.emissiveIntensity = on ? 0.35 : 0;
+      e.m.lab.material.opacity = on ? 1 : 0.45;
+    });
+  }
+  refrescarAnillo();
+
+  // ---------- Plan y animación ----------
+  var plan = [], idx = -1, fase = 'idle', t = 0, desde = new THREE.Vector3(), hasta = new THREE.Vector3(), curva = null, dwell = 0, corriendo = false, correccionHecha = false;
+
+  function resultadoPad() {
+    var h = $('hallazgo').value;
+    if (h === 'critico') return 'bloqueado';
+    if (h === 'alto') return correccionHecha ? 'aprobado' : 'correcciones';
+    if (h === 'medio') return 'obs';
+    return 'aprobado';
+  }
+
+  function construirPlan() {
+    var p = [];
+    function push(id, extra) { var st = estMesh[id]; var ap = st.aplica ? st.aplica(nivel) : true; p.push(Object.assign({ st: st, aplica: ap }, extra || {})); }
+    ['cambio', 'clasificar', 'desarrollo', 'validacion', 'cruzada', 'qa', 'respaldo', 'autorizacion', 'auditoria'].forEach(function (id) { push(id); });
+    var h = $('hallazgo').value;
+    if (h === 'alto') {
+      push('estado', { pad: 'correcciones' });
+      push('desarrollo', { vuelta: true, nota: 'Vuelve al especialista. Solo se repiten las verificaciones afectadas y las que dependen de ellas.' });
+      push('validacion'); push('cruzada'); push('qa'); push('auditoria', { nota: 'Segunda auditoría: con la corrección medida antes y después, o la prueba que fallaba y ahora pasa.' });
+      push('estado', { pad: 'aprobado' });
+    } else {
+      push('estado', { pad: h === 'critico' ? 'bloqueado' : (h === 'medio' ? 'obs' : 'aprobado') });
+    }
+    if (h !== 'critico') { push('produccion'); push('observacion'); }
+    return p;
+  }
+
+  function pintarPlan() {
+    var p = (fase === 'idle' || fase === 'fin') ? construirPlan() : plan;
+    var ol = $('pasos'); ol.innerHTML = '';
+    p.forEach(function (paso, i) {
+      var li = document.createElement('li');
+      var nombre = paso.pad ? 'ESTADO → ' + PADS.filter(function (x) { return x.id === paso.pad; })[0].nombre : paso.st.nombre + (paso.vuelta ? ' (de nuevo)' : '');
+      li.innerHTML = '<span></span>'; li.firstChild.textContent = nombre;
+      if (!paso.aplica) li.classList.add('salta');
+      if (fase !== 'idle' && fase !== 'fin') { if (i < idx) li.classList.add('hecho'); else if (i === idx) li.classList.add('activo'); }
+      else if (fase === 'fin') li.classList.add('hecho');
+      ol.appendChild(li);
+    });
+  }
+
+  function posDe(paso) { return paso.pad ? estMesh.estado.m.pads[paso.pad].userData.pos : paso.st.m.pos; }
+
+  function lanzar() {
+    plan = construirPlan(); idx = -1; correccionHecha = false; corriendo = true;
+    colorNivel = new THREE.Color(NIVELES[nivel].color);
+    cambioMat.color.copy(colorNivel); cambioMat.emissive.copy(colorNivel); luzCambio.color.copy(colorNivel); estela.material.color.copy(colorNivel);
+    ESTACIONES.forEach(function (st) { setEstacion(st, (st.aplica && !st.aplica(nivel)) ? 'salta' : 'idle'); });
+    PADS.forEach(function (p) { setPad(p.id, 'idle'); });
+    cambio.position.copy(estMesh.cambio.m.pos);
+    for (var i = 0; i < estelaN; i++) estelaPts[i].copy(cambio.position);
+    $('lanzar').textContent = 'Reiniciar'; $('pausar').disabled = false; $('pausar').textContent = 'Pausar';
+    siguiente();
+  }
+  $('lanzar').addEventListener('click', lanzar);
+  $('pausar').addEventListener('click', function () { corriendo = !corriendo; $('pausar').textContent = corriendo ? 'Pausar' : 'Continuar'; });
+
+  function siguiente() {
+    if (idx >= 0 && plan[idx]) {
+      var prev = plan[idx];
+      if (prev.pad) setPad(prev.pad, 'idle'); else setEstacion(prev.st, prev.aplica ? 'hecho' : 'salta');
+      if (prev.pad === 'correcciones') correccionHecha = true;
+    }
+    idx++;
+    if (idx >= plan.length) { terminar(); return; }
+    var paso = plan[idx];
+    desde.copy(cambio.position); hasta.copy(posDe(paso));
+    curva = paso.vuelta ? curvaVuelta : null;
+    t = 0; fase = idx === 0 ? 'dwell' : 'viaje';
+    if (fase === 'dwell') llegar();
+    pintarPlan();
+  }
+
+  function llegar() {
+    var paso = plan[idx];
+    fase = 'dwell';
+    dwell = paso.aplica ? (paso.st.dwell || 2.6) : 0.7;
+    if (paso.pad) { setPad(paso.pad, 'activo'); dwell = paso.pad === 'bloqueado' ? 1.5 : 2.4; }
+    else setEstacion(paso.st, paso.aplica ? 'activo' : 'salta');
+    if (paso.pad === 'bloqueado') { cambioMat.color.set(0xff4d6d); cambioMat.emissive.set(0xff4d6d); luzCambio.color.set(0xff4d6d); }
+    if (paso.pad === 'correcciones') { cambioMat.color.set(0xff8a3d); cambioMat.emissive.set(0xff8a3d); luzCambio.color.set(0xff8a3d); }
+    if (paso.vuelta) { cambioMat.color.copy(colorNivel); cambioMat.emissive.copy(colorNivel); luzCambio.color.copy(colorNivel); }
+    pintarEtapa(paso);
+  }
+
+  function terminar() {
+    fase = 'fin'; corriendo = false; $('pausar').disabled = true;
+    var ultimo = plan[plan.length - 1];
+    var bloqueado = ultimo.pad === 'bloqueado';
+    $('etapa').style.setProperty('--etapa-c', bloqueado ? 'var(--blk)' : NIVELES[nivel].css);
+    $('etapa-tag').textContent = bloqueado ? 'FIN · BLOQUEADO' : 'FIN · ESTABILIZADO';
+    $('etapa-nombre').textContent = bloqueado ? 'El cambio no llega a producción' : 'Cambio en producción y observado';
+    $('etapa-texto').textContent = bloqueado
+      ? 'Queda una condición crítica abierta. El Coordinador corrige su decisión en el informe si hizo falta, y deja dicho qué la causó. Nada se resuelve desplegando.'
+      : 'Primero calidad, seguridad y consistencia; después producción. El cierre es del Coordinador, no de los especialistas.';
+    $('etapa-lista').innerHTML = '';
+    pintarPlan();
+  }
+
+  function pintarEtapa(paso) {
+    var st = paso.st, act = activosNombres();
+    var etapa = $('etapa'), lista = $('etapa-lista'); lista.innerHTML = '';
+    if (paso.pad) {
+      var p = PADS.filter(function (x) { return x.id === paso.pad; })[0];
+      etapa.style.setProperty('--etapa-c', p.css);
+      $('etapa-tag').textContent = 'ESTADO · ' + NIVELES[nivel].nombre;
+      $('etapa-nombre').textContent = p.nombre;
+      $('etapa-texto').textContent = p.texto;
+      return;
+    }
+    etapa.style.setProperty('--etapa-c', paso.aplica ? NIVELES[nivel].css : 'var(--line)');
+    $('etapa-tag').textContent = (paso.aplica ? 'ETAPA' : 'NO APLICA') + ' · ' + NIVELES[nivel].nombre + (st.coord ? ' · COORDINADOR' : '');
+    $('etapa-nombre').textContent = st.nombre + (paso.vuelta ? ' (de nuevo)' : '');
+    $('etapa-texto').textContent = paso.nota || (paso.aplica ? st.texto(nivel, chips, act) : st.salta);
+    if (st.check) {
+      for (var n = 1; n <= 4; n++) CHECK[n].forEach(function (item) {
+        var li = document.createElement('li'); li.textContent = item;
+        li.className = n <= nivel ? 'ok' : 'na'; lista.appendChild(li);
+      });
+    }
+    if (st.anillo && act.length) {
+      act.forEach(function (nombre) { var li = document.createElement('li'); li.textContent = nombre; li.className = 'ok'; lista.appendChild(li); });
+    }
+  }
+
+  // ---------- Bucle ----------
+  var reloj = new THREE.Clock();
+  function animar() {
+    requestAnimationFrame(animar);
+    var dt = Math.min(reloj.getDelta(), 0.05), ahora = reloj.elapsedTime;
+    var paso = plan[idx];
+
+    if (corriendo) {
+      if (fase === 'viaje') {
+        var dur = (curva ? 2.6 : 1.3) / velocidad;
+        t += dt / dur;
+        var k = t >= 1 ? 1 : (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+        if (curva) cambio.position.copy(curva.getPoint(k));
+        else { cambio.position.lerpVectors(desde, hasta, k); cambio.position.y = 0.8 + Math.sin(k * Math.PI) * (paso.aplica ? 1.6 : 0.6); }
+        if (t >= 1) { cambio.position.copy(hasta); llegar(); }
+      } else if (fase === 'dwell') {
+        dwell -= dt * velocidad;
+        if (dwell <= 0) siguiente();
+      }
+    }
+
+    // Estela
+    estelaPts.pop(); estelaPts.unshift(cambio.position.clone());
+    estela.geometry.setFromPoints(estelaPts);
+
+    // Coordinador: se mueve a su etapa, si no flota en el centro
+    var enEtapaCoord = paso && !paso.pad && paso.st.coord && fase === 'dwell' && paso.aplica;
+    if (enEtapaCoord) coordDestino.set(paso.st.x, 7.5, 0); else coordDestino.set(estMesh.validacion.x, 10, -3);
+    coord.position.lerp(coordDestino, 1 - Math.pow(0.02, dt));
+    coordCuerpo.rotation.y += dt * 0.6;
+    if (!REDUCIDO) { coord.position.y += Math.sin(ahora * 1.4) * 0.004; coordAro.rotation.z += dt * 0.4; }
+    coordCuerpo.material.emissiveIntensity = enEtapaCoord ? 0.95 : 0.5;
+    luzCoord.intensity = enEtapaCoord ? 1.8 : 0.8;
+    hazPoner(hazPrincipal, coord.position, enEtapaCoord ? cambio.position : coord.position, enEtapaCoord ? 0.8 : 0);
+
+    // Especialistas: en DESARROLLO los activos trabajan (haz desde el coordinador + flotan)
+    var enDesarrollo = enEtapaCoord && paso.st.anillo;
+    ESPECIALISTAS.forEach(function (e, i) {
+      var m = e.m; var trabajando = enDesarrollo && m.activo;
+      var alvo = trabajando ? 1.0 : 0;
+      m.cuerpo.material.emissiveIntensity += (alvo * 0.9 + (m.activo ? 0.3 : 0) - m.cuerpo.material.emissiveIntensity) * Math.min(1, dt * 4);
+      m.cuerpo.rotation.y += dt * (trabajando ? 1.8 : 0.25);
+      m.cuerpo.position.y = 1.2 + (trabajando && !REDUCIDO ? Math.sin(ahora * 3 + m.fase) * 0.25 : 0);
+      var top = m.g.position.clone(); top.y = m.cuerpo.position.y;
+      hazPoner(hacesAsig[i], coord.position, top, trabajando ? 0.45 : 0);
+    });
+
+    // Pulso de la estación activa y del cambio
+    if (paso && fase === 'dwell' && !REDUCIDO) {
+      var pulso = 0.5 + Math.sin(ahora * 5) * 0.5;
+      if (paso.pad) estMesh.estado.m.pads[paso.pad].userData.aro.material.opacity = 0.6 + pulso * 0.4;
+      else if (paso.aplica) paso.st.m.base.material.emissiveIntensity = 0.25 + pulso * 0.25;
+      cambioCuerpo.scale.setScalar(1 + pulso * 0.12);
+    } else cambioCuerpo.scale.setScalar(1);
+
+    // Cámara
+    if (seguir && fase !== 'idle') objetivoDeseado.copy(cambio.position).add(new THREE.Vector3(0, 1.2, 0));
+    else if (!seguir) objetivoDeseado.set(8, 2, 0);
+    cam.target.lerp(objetivoDeseado, 1 - Math.pow(0.03, dt));
+    camera.position.set(
+      cam.target.x + cam.dist * Math.sin(cam.phi) * Math.sin(cam.theta),
+      cam.target.y + cam.dist * Math.cos(cam.phi),
+      cam.target.z + cam.dist * Math.sin(cam.phi) * Math.cos(cam.theta));
+    camera.lookAt(cam.target);
+    renderer.render(scene, camera);
+  }
+
+  pintarNivel(); pintarPlan();
+  ESTACIONES.forEach(function (st) { setEstacion(st, (st.aplica && !st.aplica(nivel)) ? 'salta' : 'idle'); });
+  animar();
+})();
+</script>
