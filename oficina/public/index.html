@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Oficina IA</title>
+<link rel="icon" href="/icono.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/estilos.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<div id="app">
+  <header id="barra">
+    <div class="marca">
+      <span class="logo" aria-hidden="true"></span>
+      <h1>Oficina IA</h1>
+    </div>
+    <div id="resumen" class="resumen" aria-live="polite"></div>
+    <div class="acciones-barra">
+      <span id="conexion" class="conexion" data-estado="conectando"><i></i><span>Conectando…</span></span>
+      <button id="btn-ayuda" class="btn sec" type="button">Conectar Claude Code</button>
+    </div>
+  </header>
+
+  <main id="escena">
+    <canvas id="c" tabindex="0" aria-label="Oficina 3D. Cada escritorio es una sesión de Claude Code. Clic para ver el detalle; flechas para girar y + / − para acercar."></canvas>
+    <div id="sin-webgl" class="aviso-escena" hidden>Este navegador no puede crear un contexto WebGL. El panel lateral sigue mostrando las sesiones y permite darles órdenes.</div>
+    <div id="vacio" class="vacio" hidden>
+      <h2>Todavía no hay agentes en la oficina</h2>
+      <p>Cuando una sesión de Claude Code (terminal o VS Code) empiece a trabajar, aparecerá aquí su escritorio.</p>
+      <p id="vacio-motivo" class="nota"></p>
+      <button class="btn" type="button" data-abre-ayuda>Cómo conectarlo</button>
+    </div>
+    <ul id="leyenda" class="leyenda" aria-label="Leyenda de estados"></ul>
+  </main>
+
+  <aside id="panel" aria-label="Agentes">
+    <section id="lista-sec">
+      <p class="eyebrow">Agentes</p>
+      <ul id="lista" class="lista"></ul>
+    </section>
+
+    <section id="detalle" hidden>
+      <div class="det-cab">
+        <button id="volver" class="btn sec mini" type="button" aria-label="Volver a la lista">←</button>
+        <div class="det-tit">
+          <h2 id="d-proyecto"></h2>
+          <p id="d-cwd" class="mono tenue"></p>
+        </div>
+      </div>
+      <div class="chips" id="d-chips"></div>
+
+      <div class="tarjeta" id="d-ahora"></div>
+
+      <div class="rejilla-datos">
+        <div><span class="eyebrow">Contexto</span><b id="d-ctx" class="mono">—</b></div>
+        <div><span class="eyebrow">Tokens de salida</span><b id="d-sal" class="mono">—</b></div>
+        <div><span class="eyebrow">Activo desde</span><b id="d-ini" class="mono">—</b></div>
+      </div>
+
+      <div id="d-subagentes-sec" hidden>
+        <p class="eyebrow">Subagentes</p>
+        <ul id="d-subagentes" class="sub-lista"></ul>
+      </div>
+
+      <div class="ordenes">
+        <p class="eyebrow">Darle una orden</p>
+        <form id="f-orden">
+          <label for="orden" class="oculto">Orden para este agente</label>
+          <textarea id="orden" rows="3" maxlength="4000" placeholder="Ej.: cuando termines, ejecuta las pruebas y súbelo a una rama nueva"></textarea>
+          <div class="fila">
+            <span id="orden-ayuda" class="nota">Se entrega en su próximo paso (tras una herramienta o al terminar el turno). Ctrl+Enter para enviar.</span>
+            <button class="btn" type="submit" id="btn-orden">Enviar orden</button>
+          </div>
+        </form>
+        <label class="interruptor">
+          <input type="checkbox" id="guardia">
+          <span><b>Modo guardia</b> — al terminar su turno, el agente se queda esperando órdenes de la oficina en lugar de pararse. <span id="guardia-plazo"></span></span>
+        </label>
+        <ul id="d-ordenes" class="lista-ordenes"></ul>
+      </div>
+
+      <details class="bloque" id="d-textos">
+        <summary>Último prompt y última respuesta</summary>
+        <p class="eyebrow">Prompt</p><p id="d-prompt" class="texto"></p>
+        <p class="eyebrow">Respuesta</p><p id="d-mensaje" class="texto"></p>
+      </details>
+
+      <div>
+        <p class="eyebrow">Actividad</p>
+        <ol id="d-log" class="log"></ol>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<dialog id="ayuda">
+  <form method="dialog" class="ayuda-cab">
+    <h2>Conectar Claude Code con la oficina</h2>
+    <button class="btn sec mini" aria-label="Cerrar">✕</button>
+  </form>
+  <ol class="pasos">
+    <li><b>Instala los hooks</b> (una vez). Desde la carpeta del repositorio:
+      <pre>docker compose run --rm instalar</pre>
+      Añade a <code>~/.claude/settings.json</code> hooks de tipo <code>http</code> que envían cada evento a esta oficina, con un token propio. Guarda antes una copia del archivo.</li>
+    <li><b>Reinicia las sesiones</b> de Claude Code (terminal o VS Code) para que carguen los hooks. Comprueba con <code>/hooks</code>.</li>
+    <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio. Pulsa sobre él para ver qué hace y darle órdenes.</li>
+  </ol>
+  <p class="nota">Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el sistema de permisos normal de Claude Code: no le dan permisos nuevos.</p>
+</dialog>
+</body>
+</html>

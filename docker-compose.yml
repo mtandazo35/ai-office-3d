@@ -1,0 +1,50 @@
+# Oficina IA: ve tus sesiones de Claude Code en una oficina 3D y dales órdenes.
+#
+#   docker compose up -d --build          # levanta la oficina en http://127.0.0.1:7777
+#   docker compose run --rm instalar      # instala los hooks en ~/.claude/settings.json (una vez)
+#   AI_OFFICE_DEMO=1 docker compose up    # prueba sin Claude Code, con agentes simulados
+#
+# Ajustes opcionales en .env (ver .env.example).
+
+x-endurecido: &endurecido
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  user: "${UID_GID:-1000:1000}"
+
+services:
+  oficina:
+    <<: *endurecido
+    build: ./oficina
+    image: ai-office-3d/oficina:local
+    container_name: ai-office
+    restart: unless-stopped
+    # Solo en el propio equipo: la oficina puede dar órdenes a Claude, no la expongas a la red.
+    ports:
+      - "127.0.0.1:${PUERTO:-7777}:7777"
+    environment:
+      GUARDIA_MAX_MIN: "${GUARDIA_MAX_MIN:-14}"
+      AI_OFFICE_DEMO: "${AI_OFFICE_DEMO:-0}"
+    volumes:
+      # Solo lectura: el token de los hooks y los transcripts (para tokens y sesiones recientes).
+      - "${CLAUDE_DIR:-${HOME}/.claude}:/claude:ro"
+    mem_limit: 256m
+    pids_limit: 100
+
+  instalar:
+    <<: *endurecido
+    profiles: ["instalar"]
+    build: ./oficina
+    image: ai-office-3d/oficina:local
+    network_mode: none
+    entrypoint: ["node", "scripts/instalar-hooks.mjs"]
+    environment:
+      CLAUDE_DIR: /claude
+      PUERTO: "${PUERTO:-7777}"
+      GUARDIA_MAX_MIN: "${GUARDIA_MAX_MIN:-14}"
+    volumes:
+      # Lectura y escritura solo para este paso: añade los hooks a settings.json.
+      - "${CLAUDE_DIR:-${HOME}/.claude}:/claude"
