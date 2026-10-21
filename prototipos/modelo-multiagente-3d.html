@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mis agentes en 3D</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -40,7 +45,14 @@
     display: flex; flex-direction: column; gap: 18px;
   }
   #escena { position: relative; min-width: 0; min-height: 0; }
-  #escena canvas { display: block; width: 100%; height: 100%; }
+  #escena canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  #escena canvas:active { cursor: grabbing; }
+  #escena canvas:focus-visible { outline: 2px solid var(--n2); outline-offset: -2px; }
+  .nivel:disabled, .chip:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
+  #sin-webgl {
+    position: absolute; inset: 0; display: none; place-items: center; padding: 24px; text-align: center; color: var(--muted);
+  }
+  #sin-webgl.visible { display: grid; }
   h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: .01em; text-wrap: balance; }
   .sub { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
   .eyebrow {
@@ -123,7 +135,8 @@
     .nivel, .chip { transition: none; }
   }
 </style>
-
+</head>
+<body>
 <div id="app">
   <aside id="panel">
     <header>
@@ -180,7 +193,7 @@
 
     <section>
       <p class="eyebrow">Etapa actual</p>
-      <div id="etapa">
+      <div id="etapa" aria-live="polite">
         <span id="etapa-tag">EN ESPERA</span>
         <p id="etapa-nombre">Sin cambio en curso</p>
         <p id="etapa-texto">Elige nivel, marca qué toca el cambio y pulsa «Lanzar cambio». Arrastra en la escena para girar la cámara; rueda o pellizco para acercar.</p>
@@ -211,12 +224,13 @@
   </aside>
 
   <div id="escena">
-    <canvas id="c" aria-label="Escena 3D del flujo multiagente"></canvas>
+    <canvas id="c" tabindex="0" role="img" aria-label="Escena 3D del flujo multiagente. Con el foco aquí: flechas para girar, + y − para acercar o alejar."></canvas>
+    <div id="sin-webgl" role="alert">Este navegador no puede crear un contexto WebGL, así que la escena 3D no se muestra. El panel sigue describiendo el recorrido.</div>
     <div id="hud">
       <button class="btn sec" id="ver-todo">Ver todo</button>
       <button class="btn sec" id="seguir" aria-pressed="true">Seguir el cambio: sí</button>
     </div>
-    <div id="ayuda">arrastrar = girar · rueda / pellizco = zoom</div>
+    <div id="ayuda">arrastrar / flechas = girar · rueda / pellizco / +− = zoom</div>
   </div>
 </div>
 
@@ -332,9 +346,26 @@
   });
   $('ver-todo').addEventListener('click', function () { seguir = false; $('seguir').setAttribute('aria-pressed', 'false'); $('seguir').textContent = 'Seguir el cambio: no'; cam.dist = 78; cam.phi = 1.02; cam.theta = 0.35; });
 
+  // Índice de estaciones por id: lo usa el plan aunque la escena 3D no llegue a crearse.
+  var estMesh = {};
+  ESTACIONES.forEach(function (st) { estMesh[st.id] = st; });
+
   // ---------- Escena ----------
   var canvas = $('c');
-  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  var renderer = null;
+  try {
+    if (window.THREE) renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  } catch (err) { renderer = null; }
+  if (!renderer) {
+    // Sin three.js (CDN bloqueado) o sin WebGL: el panel sigue explicando el recorrido.
+    $('sin-webgl').classList.add('visible');
+    canvas.style.display = 'none'; $('hud').style.display = 'none'; $('ayuda').style.display = 'none';
+    $('lanzar').disabled = true;
+    refrescarAnillo = function () {};
+    fase = 'idle'; plan = [];
+    pintarNivel(); pintarPlan();
+    return;
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputEncoding = THREE.sRGBEncoding;
   var scene = new THREE.Scene();
@@ -350,8 +381,18 @@
   var suelo = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshStandardMaterial({ color: 0x0d1220, roughness: 1 }));
   suelo.rotation.x = -Math.PI / 2; suelo.position.y = -0.02; scene.add(suelo);
 
+  // Las etiquetas se pintan en un canvas 2D. Si las fuentes web aún no han llegado, se
+  // pintan con la de reserva y se repintan cuando document.fonts termina de cargarlas.
+  var etiquetas = [];
   function etiqueta(texto, opts) {
-    opts = opts || {};
+    var sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false }));
+    sp.userData.etq = { texto: texto, opts: opts || {} };
+    pintarEtiqueta(sp);
+    etiquetas.push(sp);
+    return sp;
+  }
+  function pintarEtiqueta(sp) {
+    var texto = sp.userData.etq.texto, opts = sp.userData.etq.opts;
     var fs = opts.fs || 40, pad = 24;
     var cv = document.createElement('canvas');
     var ctx = cv.getContext('2d');
@@ -379,14 +420,19 @@
     }
     var tex = new THREE.CanvasTexture(cv);
     tex.minFilter = THREE.LinearFilter; tex.encoding = THREE.sRGBEncoding;
-    var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    if (sp.material.map) sp.material.map.dispose();
+    sp.material.map = tex; sp.material.needsUpdate = true;
     var esc = opts.escala || 0.012;
     sp.scale.set(cv.width * esc, cv.height * esc, 1);
-    return sp;
+  }
+  if (document.fonts && document.fonts.load) {
+    Promise.all([
+      document.fonts.load('600 40px "JetBrains Mono"'),
+      document.fonts.load('400 28px "Barlow"')
+    ]).then(function () { etiquetas.forEach(pintarEtiqueta); }, function () { /* se quedan con la fuente de reserva */ });
   }
 
   // Estaciones
-  var estMesh = {};
   ESTACIONES.forEach(function (st) {
     var g = new THREE.Group(); g.position.set(st.x, 0, 0);
     if (!st.pads) {
@@ -414,7 +460,6 @@
       });
     }
     scene.add(g);
-    estMesh[st.id] = st;
   });
 
   // Camino principal
@@ -486,11 +531,26 @@
   var cambioLab = etiqueta('cambio', { fs: 26, escala: 0.011, fondo: false }); cambioLab.position.y = 1.2; cambio.add(cambioLab);
   cambio.position.copy(estMesh.cambio.m.pos); cambio.visible = true; scene.add(cambio);
 
-  // Estela
-  var estelaN = 40, estelaPts = [];
-  for (var i = 0; i < estelaN; i++) estelaPts.push(cambio.position.clone());
-  var estela = new THREE.Line(new THREE.BufferGeometry().setFromPoints(estelaPts), new THREE.LineBasicMaterial({ color: 0xffb545, transparent: true, opacity: 0.5 }));
+  // Estela: un único buffer preasignado que se desplaza en cada frame. Antes se llamaba a
+  // setFromPoints() por frame, lo que crea un atributo nuevo (y un buffer de GPU que no se
+  // libera) 60 veces por segundo.
+  var estelaN = 40;
+  var estelaArr = new Float32Array(estelaN * 3);
+  var estelaGeo = new THREE.BufferGeometry();
+  estelaGeo.setAttribute('position', new THREE.BufferAttribute(estelaArr, 3).setUsage(THREE.DynamicDrawUsage));
+  var estela = new THREE.Line(estelaGeo, new THREE.LineBasicMaterial({ color: 0xffb545, transparent: true, opacity: 0.5 }));
+  estela.frustumCulled = false;
   scene.add(estela);
+  function estelaReiniciar(p) {
+    for (var i = 0; i < estelaN; i++) { estelaArr[i * 3] = p.x; estelaArr[i * 3 + 1] = p.y; estelaArr[i * 3 + 2] = p.z; }
+    estelaGeo.attributes.position.needsUpdate = true;
+  }
+  function estelaAvanzar(p) {
+    estelaArr.copyWithin(3, 0, (estelaN - 1) * 3);
+    estelaArr[0] = p.x; estelaArr[1] = p.y; estelaArr[2] = p.z;
+    estelaGeo.attributes.position.needsUpdate = true;
+  }
+  estelaReiniciar(cambio.position);
 
   // ---------- Cámara orbital propia ----------
   var cam = { theta: 0.55, phi: 1.1, dist: 42, target: new THREE.Vector3(-10, 1.5, 0) };
@@ -516,6 +576,18 @@
   function soltar(e) { delete punteros[e.pointerId]; pinchDist = 0; }
   canvas.addEventListener('pointerup', soltar); canvas.addEventListener('pointercancel', soltar);
   canvas.addEventListener('wheel', function (e) { e.preventDefault(); cam.dist *= 1 + e.deltaY * 0.0012; cam.dist = Math.max(10, Math.min(130, cam.dist)); }, { passive: false });
+  // Teclado: la escena también se puede girar y acercar sin ratón.
+  canvas.addEventListener('keydown', function (e) {
+    var k = e.key, hecho = true;
+    if (k === 'ArrowLeft') cam.theta += 0.12;
+    else if (k === 'ArrowRight') cam.theta -= 0.12;
+    else if (k === 'ArrowUp') cam.phi = Math.max(0.25, cam.phi - 0.08);
+    else if (k === 'ArrowDown') cam.phi = Math.min(1.5, cam.phi + 0.08);
+    else if (k === '+' || k === '=') cam.dist = Math.max(10, cam.dist * 0.88);
+    else if (k === '-' || k === '_') cam.dist = Math.min(130, cam.dist * 1.12);
+    else hecho = false;
+    if (hecho) e.preventDefault();
+  });
 
   function ajustarTamano() {
     var w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
@@ -552,15 +624,7 @@
   refrescarAnillo();
 
   // ---------- Plan y animación ----------
-  var plan = [], idx = -1, fase = 'idle', t = 0, desde = new THREE.Vector3(), hasta = new THREE.Vector3(), curva = null, dwell = 0, corriendo = false, correccionHecha = false;
-
-  function resultadoPad() {
-    var h = $('hallazgo').value;
-    if (h === 'critico') return 'bloqueado';
-    if (h === 'alto') return correccionHecha ? 'aprobado' : 'correcciones';
-    if (h === 'medio') return 'obs';
-    return 'aprobado';
-  }
+  var plan = [], idx = -1, fase = 'idle', t = 0, desde = new THREE.Vector3(), hasta = new THREE.Vector3(), curva = null, dwell = 0, corriendo = false;
 
   function construirPlan() {
     var p = [];
@@ -596,24 +660,50 @@
   function posDe(paso) { return paso.pad ? estMesh.estado.m.pads[paso.pad].userData.pos : paso.st.m.pos; }
 
   function lanzar() {
-    plan = construirPlan(); idx = -1; correccionHecha = false; corriendo = true;
+    plan = construirPlan(); idx = -1; corriendo = true;
     colorNivel = new THREE.Color(NIVELES[nivel].color);
     cambioMat.color.copy(colorNivel); cambioMat.emissive.copy(colorNivel); luzCambio.color.copy(colorNivel); estela.material.color.copy(colorNivel);
     ESTACIONES.forEach(function (st) { setEstacion(st, (st.aplica && !st.aplica(nivel)) ? 'salta' : 'idle'); });
     PADS.forEach(function (p) { setPad(p.id, 'idle'); });
     cambio.position.copy(estMesh.cambio.m.pos);
-    for (var i = 0; i < estelaN; i++) estelaPts[i].copy(cambio.position);
-    $('lanzar').textContent = 'Reiniciar'; $('pausar').disabled = false; $('pausar').textContent = 'Pausar';
+    estelaReiniciar(cambio.position);
+    bloquearControles(true);
+    $('lanzar').textContent = 'Detener'; $('pausar').disabled = false; $('pausar').textContent = 'Pausar';
     siguiente();
   }
-  $('lanzar').addEventListener('click', lanzar);
+
+  // Durante un recorrido el plan ya está construido: cambiar nivel, áreas o hallazgo a mitad
+  // de camino dejaba el panel, el anillo y los colores describiendo un cambio distinto al que
+  // se estaba animando. Los controles se bloquean hasta terminar o detener.
+  function bloquearControles(si) {
+    document.querySelectorAll('.nivel, .chip').forEach(function (b) { b.disabled = si; });
+    $('hallazgo').disabled = si;
+  }
+
+  function detener() {
+    fase = 'idle'; corriendo = false; plan = []; idx = -1;
+    bloquearControles(false);
+    $('lanzar').textContent = 'Lanzar cambio'; $('pausar').disabled = true; $('pausar').textContent = 'Pausar';
+    colorNivel = new THREE.Color(NIVELES[nivel].color);
+    cambioMat.color.copy(colorNivel); cambioMat.emissive.copy(colorNivel); luzCambio.color.copy(colorNivel); estela.material.color.copy(colorNivel);
+    ESTACIONES.forEach(function (st) { setEstacion(st, (st.aplica && !st.aplica(nivel)) ? 'salta' : 'idle'); });
+    PADS.forEach(function (p) { setPad(p.id, 'idle'); });
+    cambio.position.copy(estMesh.cambio.m.pos); estelaReiniciar(cambio.position);
+    $('etapa').style.removeProperty('--etapa-c');
+    $('etapa-tag').textContent = 'EN ESPERA';
+    $('etapa-nombre').textContent = 'Sin cambio en curso';
+    $('etapa-texto').textContent = 'Elige nivel, marca qué toca el cambio y pulsa «Lanzar cambio».';
+    $('etapa-lista').innerHTML = '';
+    pintarPlan();
+  }
+
+  $('lanzar').addEventListener('click', function () { if (fase === 'idle' || fase === 'fin') lanzar(); else detener(); });
   $('pausar').addEventListener('click', function () { corriendo = !corriendo; $('pausar').textContent = corriendo ? 'Pausar' : 'Continuar'; });
 
   function siguiente() {
     if (idx >= 0 && plan[idx]) {
       var prev = plan[idx];
       if (prev.pad) setPad(prev.pad, 'idle'); else setEstacion(prev.st, prev.aplica ? 'hecho' : 'salta');
-      if (prev.pad === 'correcciones') correccionHecha = true;
     }
     idx++;
     if (idx >= plan.length) { terminar(); return; }
@@ -639,6 +729,7 @@
 
   function terminar() {
     fase = 'fin'; corriendo = false; $('pausar').disabled = true;
+    bloquearControles(false); $('lanzar').textContent = 'Lanzar de nuevo';
     var ultimo = plan[plan.length - 1];
     var bloqueado = ultimo.pad === 'bloqueado';
     $('etapa').style.setProperty('--etapa-c', bloqueado ? 'var(--blk)' : NIVELES[nivel].css);
@@ -699,8 +790,7 @@
     }
 
     // Estela
-    estelaPts.pop(); estelaPts.unshift(cambio.position.clone());
-    estela.geometry.setFromPoints(estelaPts);
+    estelaAvanzar(cambio.position);
 
     // Coordinador: se mueve a su etapa, si no flota en el centro
     var enEtapaCoord = paso && !paso.pad && paso.st.coord && fase === 'dwell' && paso.aplica;
@@ -733,7 +823,7 @@
     } else cambioCuerpo.scale.setScalar(1);
 
     // Cámara
-    if (seguir && fase !== 'idle') objetivoDeseado.copy(cambio.position).add(new THREE.Vector3(0, 1.2, 0));
+    if (seguir && fase !== 'idle') { objetivoDeseado.copy(cambio.position); objetivoDeseado.y += 1.2; }
     else if (!seguir) objetivoDeseado.set(8, 2, 0);
     cam.target.lerp(objetivoDeseado, 1 - Math.pow(0.03, dt));
     camera.position.set(
@@ -749,3 +839,5 @@
   animar();
 })();
 </script>
+</body>
+</html>
