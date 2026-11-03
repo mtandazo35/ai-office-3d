@@ -9,7 +9,7 @@ let seleccion = null;
 let config = {};
 let ws = null;
 let escena = null;
-const ESTADOS_VISIBLES = ['ejecutando', 'pensando', 'esperando', 'guardia', 'error', 'sin_senal', 'inactivo'];
+const ESTADOS_VISIBLES = ['ejecutando', 'coordinando', 'pensando', 'esperando', 'guardia', 'error', 'sin_senal', 'inactivo'];
 // Modos en los que Claude Code no pide aprobación: una orden se ejecuta sin que nadie la vea antes.
 const MODOS_SIN_APROBACION = new Set(['bypassPermissions', 'dontAsk', 'auto']);
 
@@ -59,6 +59,7 @@ function hace(ts) {
 const miles = (n) => (n ? n.toLocaleString('es') : '—');
 const orden = () => [...sesiones.values()].sort((a, b) => (a.inicio || 0) - (b.inicio || 0));
 function queHace(s) {
+  if (s.estado === 'coordinando') return 'Coordina a ' + s.subagentes.map((a) => a.nombre).join(', ');
   if (s.estado === 'esperando') return s.permiso ? 'Pide permiso: ' + s.permiso : 'Espera tu aprobación en la terminal';
   if (s.estado === 'guardia') return 'Esperando órdenes de la oficina';
   if (s.herramienta) return (s.estado === 'ejecutando' ? '' : 'último: ') + s.herramienta + ' · ' + s.detalle;
@@ -122,7 +123,7 @@ function pintarLista() {
     f.boton.style.setProperty('--c', COLORES[s.estado] || COLORES.inactivo);
     f.boton.setAttribute('aria-current', String(s.id === seleccion));
     poner(f.nv, 'Nv ' + nivelDe(s.herramientasUsadas).nivel);
-    poner(f.proy, s.nombre + (s.rol ? ' (' + s.rol + ')' : '') + ' · ' + s.proyecto + (pend ? '  ✉' + pend : ''));
+    poner(f.proy, s.nombre + (s.rol ? ' (' + s.rol + ')' : '') + ' · ' + s.proyecto + (s.subagentes.length ? '  +' + s.subagentes.length : '') + (pend ? '  ✉' + pend : ''));
     poner(f.est, NOMBRES[s.estado] || s.estado);
     poner(f.que, queHace(s));
     // Orden estable: solo se mueve si no está ya en su sitio.
@@ -178,7 +179,7 @@ function pintarDetalle() {
 
   $('d-subagentes-sec').hidden = !s.subagentes.length;
   $('d-subagentes').replaceChildren(...s.subagentes.map((a) => el('li', { c: COLORES[a.estado] || COLORES.pensando },
-    el('i'), el('b', {}, a.tipo), el('span', {}, a.herramienta ? a.herramienta + ' · ' + a.detalle : NOMBRES[a.estado] || ''))));
+    el('i'), el('b', {}, a.nombre + ' · ' + a.tipo), el('span', {}, a.herramienta ? a.herramienta + ' · ' + a.detalle : NOMBRES[a.estado] || ''))));
 
   // Órdenes
   const terminada = s.estado === 'terminada';

@@ -13,6 +13,8 @@ const MAX_ORDENES = 30;
 const MAX_LOTE = 9000;                  // additionalContext admite 10.000 caracteres; se deja margen para el encabezado
 const MAX_CONTINUACIONES = 8;           // Claude Code ignora el block de Stop a partir de ahí
 const SIN_SENAL_MS = 10 * 60 * 1000;
+const SUBAGENTE_SIN_EVENTOS_MS = 15 * 60 * 1000; // sin SubagentStop (corte, Esc): se retira solo
+const MAX_SUBAGENTES_TERMINADOS = 200;
 const SIN_SENAL_ESPERANDO_MS = 2 * 3600 * 1000; // pedir permiso puede durar: el dueño quizá no está
 const CERRADAS_MS = 25 * 60 * 1000;     // más que la ventana de 20 min de Transcripts.explorar()
 const MAX_NOMBRE = 24;
@@ -20,6 +22,9 @@ const MAX_ROL = 30;
 const MAX_PERFILES_GUARDADOS = 200;
 const GENEROS = ['', 'femenino', 'masculino', 'no_binario'];
 const NOMBRES_AGENTES = ['Nico', 'Lía', 'Teo', 'Vera', 'Bruno', 'Sara', 'Iker', 'Noa', 'Hugo', 'Alma', 'Dante', 'Luna', 'Marco', 'Inés', 'Leo', 'Julia', 'Omar', 'Clara', 'Tomás', 'Elsa', 'Gael', 'Nora', 'Raúl', 'Mía'];
+
+// Con subagentes trabajando, el agente principal no está parado aunque haya acabado su turno.
+const estadoVisto = (s) => (s.estado === 'inactivo' && Object.keys(s.subagentes).length ? 'coordinando' : s.estado);
 
 const limpiarTexto = (t) => (typeof t === 'string' ? t.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '');
 
@@ -108,6 +113,9 @@ class Oficina extends EventEmitter {
     const buscado = nombre.toLocaleLowerCase('es');
     for (const s of this.sesiones.values()) if (s.id !== salvoId && s.nombre.toLocaleLowerCase('es') === buscado) return true;
     for (const [id, p] of this.perfiles) if (id !== salvoId && p.nombre.toLocaleLowerCase('es') === buscado) return true;
+    for (const s of this.sesiones.values()) {
+      for (const a of Object.values(s.subagentes)) if (a.id !== salvoId && a.nombre.toLocaleLowerCase('es') === buscado) return true;
+    }
     return false;
   }
 
@@ -174,7 +182,7 @@ class Oficina extends EventEmitter {
 
   listaPerfiles() {
     const activos = [...this.sesiones.values()].map((s) => ({
-      id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, proyecto: s.proyecto, estado: s.estado, activo: true
+      id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, proyecto: s.proyecto, estado: estadoVisto(s), activo: true
     }));
     const guardados = [...this.perfiles].filter(([id]) => !this.sesiones.has(id)).map(([id, p]) => ({
       id, nombre: p.nombre, rol: p.rol || '', genero: p.genero || '', proyecto: p.proyecto || '', estado: '', activo: false, actualizado: p.actualizado
@@ -190,7 +198,7 @@ class Oficina extends EventEmitter {
         id, nombre: perfil.nombre || this.nombreAutomatico(id), rol: perfil.rol || '', genero: perfil.genero || '', cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
         estado: 'inactivo', herramienta: '', detalle: '', ultimoPrompt: '', ultimoMensaje: '',
         permiso: '', inicio: this.ahora(), ultimaActividad: this.ahora(),
-        tokens: { contexto: 0, salida: 0 }, subagentes: {}, ordenes: [], guardia: false, log: [],
+        tokens: { contexto: 0, salida: 0 }, subagentes: {}, subagentesFin: new Set(), ordenes: [], guardia: false, log: [],
         herramientasUsadas: 0, turnos: 0, modoPermisos: '', continuaciones: 0
       };
       this.sesiones.set(id, s);
@@ -212,7 +220,7 @@ class Oficina extends EventEmitter {
   vista(s) {
     return {
       id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
-      estado: s.estado, herramienta: s.herramienta, detalle: s.detalle,
+      estado: estadoVisto(s), herramienta: s.herramienta, detalle: s.detalle,
       ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso, modoPermisos: s.modoPermisos,
       inicio: s.inicio, ultimaActividad: s.ultimaActividad, tokens: { ...s.tokens },
       subagentes: Object.values(s.subagentes).map((a) => ({ ...a })),
@@ -303,6 +311,10 @@ class Oficina extends EventEmitter {
           this.registrar(s, 'subagente', 'Termina subagente ' + s.subagentes[ev.agent_id].tipo);
           delete s.subagentes[ev.agent_id];
         }
+        if (ev.agent_id) {
+          s.subagentesFin.add(ev.agent_id);
+          if (s.subagentesFin.size > MAX_SUBAGENTES_TERMINADOS) s.subagentesFin.delete(s.subagentesFin.values().next().value);
+        }
         break;
       case 'Stop':
         if (sub) break; // un Stop dentro de un subagente no cierra la sesión
@@ -316,6 +328,7 @@ class Oficina extends EventEmitter {
         this.registrar(s, 'error', ev.error || ev.reason || 'La respuesta terminó con error');
         break;
       case 'SessionEnd':
+        s.subagentes = {};
         this.liberarEspera(s.id);
         this.estado(s, 'terminada');
         s.terminadaEn = this.ahora();
@@ -330,12 +343,16 @@ class Oficina extends EventEmitter {
   }
 
   subagente(s, ev) {
+    if (ev.hook_event_name === 'SubagentStart') s.subagentesFin.delete(ev.agent_id);
+    // Un evento que llega tarde no resucita a un subagente terminado, ni cuenta como del principal.
+    if (s.subagentesFin.has(ev.agent_id)) return { id: ev.agent_id, tipo: ev.agent_type || 'subagente', estado: 'pensando', herramienta: '', detalle: '' };
     let a = s.subagentes[ev.agent_id];
     if (!a) {
-      a = { id: ev.agent_id, tipo: ev.agent_type || 'subagente', estado: 'pensando', herramienta: '', detalle: '', inicio: this.ahora() };
+      a = { id: ev.agent_id, nombre: this.nombreAutomatico(ev.agent_id), tipo: ev.agent_type || 'subagente', estado: 'pensando', herramienta: '', detalle: '', inicio: this.ahora() };
       s.subagentes[ev.agent_id] = a;
     }
     if (ev.agent_type) a.tipo = ev.agent_type;
+    a.ultimaActividad = this.ahora();
     return a;
   }
 
@@ -486,6 +503,11 @@ class Oficina extends EventEmitter {
   limpiar() {
     const t = this.ahora();
     for (const s of this.sesiones.values()) {
+      let retirados = 0;
+      for (const a of Object.values(s.subagentes)) {
+        if (t - (a.ultimaActividad || a.inicio) > SUBAGENTE_SIN_EVENTOS_MS) { delete s.subagentes[a.id]; retirados += 1; }
+      }
+      if (retirados) { this.registrar(s, 'subagente', 'Sin eventos de ' + retirados + ' subagente(s): se retiran'); this.cambio(s); }
       const quitar = (s.estado === 'terminada' && t - (s.terminadaEn || t) > 60000) ||
         (t - s.ultimaActividad > 6 * 3600 * 1000 && !this.esperas.has(s.id));
       if (quitar) {

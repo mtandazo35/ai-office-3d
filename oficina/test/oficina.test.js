@@ -676,3 +676,61 @@ test('el texto de la orden dice que viene de una sesión iniciada', async () => 
   const r = await ev(o, 'PostToolUse', { tool_name: 'Read' });
   assert.match(r.hookSpecificOutput.additionalContext, /con sesión iniciada/);
 });
+
+test('cada subagente tiene nombre propio, sin repetir el de nadie', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  for (let i = 0; i < 5; i++) await ev(o, 'SubagentStart', { agent_id: 'a' + i, agent_type: 'Explore' });
+  const s = o.sesiones.get('s1');
+  const nombres = [s.nombre, ...Object.values(s.subagentes).map((a) => a.nombre)];
+  assert.equal(new Set(nombres).size, 6);
+  const nombre = s.subagentes.a0.nombre;
+  await ev(o, 'PreToolUse', { agent_id: 'a0', agent_type: 'Explore', tool_name: 'Read', tool_input: {} });
+  assert.equal(s.subagentes.a0.nombre, nombre, 'no cambia con cada evento');
+  assert.equal(o.vista(s).subagentes[0].nombre, nombre);
+  assert.ok(o.renombrar('s1', nombre).error, 'tampoco se puede coger el nombre de un subagente');
+});
+
+test('el agente figura como coordinando si acabó su turno y sus subagentes siguen', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await ev(o, 'SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  await ev(o, 'Stop', {});
+  const s = o.sesiones.get('s1');
+  assert.equal(s.estado, 'inactivo');
+  assert.equal(o.vista(s).estado, 'coordinando');
+  assert.equal(o.listaPerfiles()[0].estado, 'coordinando');
+  await ev(o, 'SubagentStop', { agent_id: 'a1', agent_type: 'Explore' });
+  assert.equal(o.vista(s).estado, 'inactivo');
+});
+
+test('un evento tardío no resucita a un subagente ni cuenta como del principal', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await ev(o, 'SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  await ev(o, 'SubagentStop', { agent_id: 'a1', agent_type: 'Explore' });
+  const s = o.sesiones.get('s1');
+  const estado = s.estado;
+  await ev(o, 'PreToolUse', { agent_id: 'a1', agent_type: 'Explore', tool_name: 'Read', tool_input: {} });
+  assert.equal(Object.keys(s.subagentes).length, 0);
+  assert.equal(s.estado, estado);
+  await ev(o, 'SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  assert.equal(Object.keys(s.subagentes).length, 1, 'si vuelve a arrancar, sí cuenta');
+});
+
+test('un subagente sin eventos durante 15 min se retira, y SessionEnd los quita a todos', async () => {
+  let t = 1000000;
+  const o = new Oficina({ ahora: () => t });
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await ev(o, 'SubagentStart', { agent_id: 'viejo', agent_type: 'Explore' });
+  const s = o.sesiones.get('s1');
+  t += 14 * 60 * 1000;
+  await ev(o, 'SubagentStart', { agent_id: 'nuevo', agent_type: 'Explore' });
+  o.limpiar();
+  assert.deepEqual(Object.keys(s.subagentes).sort(), ['nuevo', 'viejo']);
+  t += 2 * 60 * 1000;
+  o.limpiar();
+  assert.deepEqual(Object.keys(s.subagentes), ['nuevo']);
+  await ev(o, 'SessionEnd', { reason: 'exit' });
+  assert.equal(Object.keys(s.subagentes).length, 0);
+});

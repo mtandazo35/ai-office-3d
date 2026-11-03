@@ -14,7 +14,7 @@ Oficina 3D local para ver en tiempo real qué hace cada sesión de Claude Code (
     * ⚪ **Inactivo:** sin actividad.
 * **Perfiles:** cada sesión recibe un nombre automático derivado de su id, sin repetirlo. La página `/agentes.html` permite editar nombre (máximo 24 caracteres, sin duplicados), rol (máximo 30; no se envía a Claude, solo se muestra y elige el accesorio del personaje por palabras clave) y género (cambia el peinado). Los cambios viajan por el mismo WebSocket autenticado que las órdenes. Los perfiles van por id de sesión: una sesión nueva empieza con uno nuevo.
 * **Comportamiento de los personajes:** se levantan y miran a la cámara al pedir permiso, en guardia y al celebrar; cambian cejas, boca y ojos según el estado; tras 45 s sin actividad pueden ir a la barra de café y volver. Con «reducir movimiento» no pasean.
-* **Subagentes:** se ven como robots que orbitan sobre el escritorio de la sesión que los lanzó.
+* **Subagentes:** cada uno es un personaje con nombre automático, mesa y portátil delante del escritorio de la sesión que lo lanzó; el anillo y la pantalla muestran su estado. Se dibujan hasta 6 y el detalle los lista todos. Si la sesión ya acabó su turno, figura como «Coordinando ayudantes». Un subagente sin eventos durante 15 min se retira, y los eventos que llegan tras su `SubagentStop` se ignoran.
 * **Panel lateral:** muestra la lista de agentes y, al pulsar uno, su detalle: acción actual, permiso pendiente, contexto y tokens de salida, subagentes, último prompt y respuesta, registro de actividad y las órdenes. El texto de cada orden es un borrador por agente: no se envía a otro al cambiar de escritorio, y no sale de la caja hasta que el servidor confirma.
 
 ## 2. Arquitectura
@@ -51,7 +51,7 @@ Todo cabe en **un único contenedor** (`oficina/`):
 | `PostToolUseFailure` | Error | herramienta y error |
 | `PermissionRequest`, `Notification` (`permission_prompt`) | Espera tu aprobación | qué pide |
 | `Notification` (`idle_prompt`) | Inactivo | — |
-| `SubagentStart` / `SubagentStop` | robot que aparece / desaparece | `agent_type`; sus herramientas llegan con `agent_id` |
+| `SubagentStart` / `SubagentStop` | ayudante con mesa que aparece / desaparece | `agent_type`; sus herramientas llegan con `agent_id` |
 | `Stop` | Inactivo, o En guardia | última respuesta |
 | `StopFailure` | Error | motivo |
 | `SessionEnd` | se apaga y se retira a los 60 s | — |

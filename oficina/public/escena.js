@@ -20,6 +20,8 @@ const REDUCIDO = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CAMISAS = ['#ff6b6b', '#4ecdc4', '#ffd166', '#6c8cff', '#c77dff', '#06d6a0', '#ff9f1c', '#ef476f', '#118ab2', '#f78c6b'];
 const PIELES = ['#f6d3b3', '#eebb99', '#d9a066', '#c68a5e', '#a86b45', '#7a4b2e'];
 const PELOS = ['#2b2118', '#5a3825', '#d4a017', '#b5482b', '#1c1c1c', '#9aa0a6', '#3d5a80', '#7b2d8b'];
+const MAX_AYUDANTES = 6;
+const AYUDANTES_POR_FILA = 3;
 const ZAPATOS = ['#1f1f1f', '#f8f9fa', '#e76f51', '#264653'];
 
 // El rol elige un accesorio por palabras clave; devops va antes que "dev".
@@ -235,7 +237,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
   function nuevoEscritorio(s) {
     const h = hash(s.id);
     const g = new THREE.Group();
-    const e = { id: s.id, g, h, destino: new THREE.Vector3(), firmaPantalla: '', firmaEtiqueta: '', previo: null, robots: [], ultimaParticula: 0 };
+    const e = { id: s.id, g, h, destino: new THREE.Vector3(), firmaPantalla: '', firmaEtiqueta: '', previo: null, ayudantes: new Map(), ultimaParticula: 0 };
 
     const madera = toon('#c8935f'), metal = toon('#3d405b');
     const tablero = malla(new THREE.BoxGeometry(3.2, 0.14, 1.6), madera); tablero.position.y = 1.0; g.add(tablero);
@@ -410,7 +412,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     if (!e) return;
     scene.remove(e.g); liberar(e.g);
     scene.remove(e.p.raiz); liberar(e.p.raiz);
-    e.robots.forEach((r) => { scene.remove(r.g); liberar(r.g); });
+    e.ayudantes.forEach(quitarAyudante);
     objetivosClic.splice(objetivosClic.indexOf(e.clic), 1);
     escritorios.delete(id);
   }
@@ -428,7 +430,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
   }
 
   // Posiciones del mundo de un escritorio
-  const asientoDe = (e) => new THREE.Vector3(e.destino.x, 0, e.destino.z + 1.25);
+  const asientoDe = (e) => new THREE.Vector3(e.destino.x, 0, e.destino.z + (e.asientoZ ?? 1.25));
   // Pausa para el café: cada agente tiene su sitio frente a la barra y llega por los pasillos.
   const puntoDescanso = (e) => new THREE.Vector3(dimSala.W / 2 - 2.4 + ((e.h % 4) - 1.5), 0, -dimSala.D / 2 + 2.1);
   function rutaDescanso(e) {
@@ -490,10 +492,8 @@ export function crearEscena(canvas, { alSeleccionar }) {
     }
     e.sobre.visible = s.ordenes.some((o) => o.estado === 'pendiente');
 
-    // Robots ayudantes = subagentes
-    while (e.robots.length < s.subagentes.length) { const r = nuevoRobot(e.robots.length); scene.add(r.g); e.robots.push(r); }
-    while (e.robots.length > s.subagentes.length) { const r = e.robots.pop(); efectos.chispas(r.g.position, '#c9a6ff', 14); scene.remove(r.g); liberar(r.g); }
-    e.robots.forEach((r, i) => r.visor.material.color.set(COLORES[s.subagentes[i].estado] || COLORES.pensando));
+    // Ayudantes = subagentes
+    sincronizarAyudantes(e, s);
 
     // Eventos de juego al cambiar de estado
     if (anterior) {
@@ -501,7 +501,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
       const entregadasAntes = anterior.ordenes.filter((o) => o.estado === 'entregada').length;
       const entregadas = s.ordenes.filter((o) => o.estado === 'entregada').length;
       if (entregadas > entregadasAntes) { efectos.texto(cabezaMundo(), '¡Orden recibida!', '#c9a6ff'); efectos.chispas(cabezaMundo(), '#c9a6ff', 30); e.p.saludo = 1.2; }
-      if ((anterior.estado === 'pensando' || anterior.estado === 'ejecutando') && (s.estado === 'inactivo' || s.estado === 'guardia') && s.turnos > anterior.turnos) {
+      if ((anterior.estado === 'pensando' || anterior.estado === 'ejecutando') && (s.estado === 'inactivo' || s.estado === 'guardia' || s.estado === 'coordinando') && s.turnos > anterior.turnos) {
         efectos.confeti(cabezaMundo()); efectos.texto(cabezaMundo(), '¡Turno completado!', '#2ee59d'); e.p.saludo = 1.5;
       }
       if (s.estado === 'error' && anterior.estado !== 'error') { efectos.texto(cabezaMundo(), '¡Error!', '#ff4d6d'); e.p.sacudida = 1; }
@@ -521,31 +521,81 @@ export function crearEscena(canvas, { alSeleccionar }) {
     p.modo = 'saliendo';
   }
 
-  function nuevoRobot(i) {
-    const g = new THREE.Group();
-    const cuerpo = malla(new THREE.BoxGeometry(0.34, 0.3, 0.3), toon('#edf2f4')); g.add(cuerpo);
-    const cab = malla(new THREE.SphereGeometry(0.17, 14, 10), toon('#edf2f4')); cab.position.y = 0.27; g.add(cab);
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.05), new THREE.MeshBasicMaterial({ color: COLORES.pensando, toneMapped: false }));
-    visor.position.set(0, 0.29, 0.15); g.add(visor);
-    const antena = malla(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 6), toon('#3d405b'), false); antena.position.y = 0.48; g.add(antena);
-    const bola = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: '#ff4d6d' })); bola.position.y = 0.58; g.add(bola);
-    const helice = malla(new THREE.BoxGeometry(0.5, 0.015, 0.06), toon('#3d405b'), false); helice.position.y = 0.62; g.add(helice);
-    g.userData.helice = helice;
-    g.scale.setScalar(1.3);
-    return { g, visor, fase: i * 2.1 };
+  // Cada subagente es un personaje propio, con nombre, mesa pequeña y portátil delante de su agente.
+  function nuevoAyudante(e, a) {
+    const h = hash(a.id), g = new THREE.Group();
+    const madera = toon('#d9a066'), metal = toon('#3d405b');
+    const tablero = malla(new THREE.BoxGeometry(1.8, 0.1, 0.85), madera); tablero.position.y = 0.74; g.add(tablero);
+    [-0.8, 0.8].forEach((x) => { const pata = malla(new THREE.BoxGeometry(0.08, 0.72, 0.7), metal); pata.position.set(x, 0.36, 0); g.add(pata); });
+    const base = malla(new THREE.BoxGeometry(0.62, 0.03, 0.42), toon('#2b2d42'), false); base.position.set(0, 0.805, 0.05); g.add(base);
+    const pantalla = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.4, 0.03), new THREE.MeshBasicMaterial({ color: COLORES.pensando, toneMapped: false }));
+    pantalla.position.set(0, 1.01, -0.17); pantalla.rotation.x = -0.2; g.add(pantalla);
+    const asiento = malla(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 14), toon(elegir(CAMISAS, h, 7))); asiento.position.set(0, 0.55, 0.85); g.add(asiento);
+    const columna = malla(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8), metal); columna.position.set(0, 0.27, 0.85); g.add(columna);
+    const anillo = new THREE.Mesh(new THREE.RingGeometry(1.08, 1.2, 40), new THREE.MeshBasicMaterial({ color: COLORES.pensando, transparent: true, opacity: 0.85, toneMapped: false }));
+    anillo.rotation.x = -Math.PI / 2; anillo.position.set(0, 0.035, 0.4); g.add(anillo);
+    const placa = etiqueta(' ', { tam: 26, fijo: true, px: 19 }); placa.position.set(0, 2.15, 0.1); g.add(placa);
+    const clic = new THREE.Mesh(geoClic, matClic); clic.scale.setScalar(0.5); clic.position.set(0, 0.9, 0.4); clic.userData.id = e.id; g.add(clic);
+    objetivosClic.push(clic);
+    g.position.copy(e.g.position);
+    scene.add(g);
+    const p = nuevoPersonaje(h, '', '');
+    p.raiz.scale.setScalar(0.95);
+    p.raiz.position.copy(e.g.position);
+    p.raiz.rotation.y = Math.PI;
+    p.raiz.visible = true;
+    p.modo = 'sentado';
+    scene.add(p.raiz);
+    efectos.chispas(e.g.position.clone().setY(1.5), '#5ee0d0', 16);
+    return { id: a.id, h, g, p, anillo, pantalla, placa, clic, destino: e.destino.clone(), asientoZ: 0.85, s: { estado: a.estado }, slot: 0, firma: '' };
   }
+
+  function quitarAyudante(ay) {
+    efectos.chispas(ay.g.position.clone().setY(1.5), '#5ee0d0', 14);
+    scene.remove(ay.g); liberar(ay.g);
+    scene.remove(ay.p.raiz); liberar(ay.p.raiz);
+    objetivosClic.splice(objetivosClic.indexOf(ay.clic), 1);
+  }
+
+  function sincronizarAyudantes(e, s) {
+    const visibles = s.subagentes.slice(0, MAX_AYUDANTES);
+    const vivos = new Set(visibles.map((a) => a.id));
+    for (const [id, ay] of e.ayudantes) if (!vivos.has(id)) { quitarAyudante(ay); e.ayudantes.delete(id); }
+    visibles.forEach((a, i) => {
+      let ay = e.ayudantes.get(a.id);
+      if (!ay) { ay = nuevoAyudante(e, a); e.ayudantes.set(a.id, ay); }
+      ay.slot = i;
+      ay.s = { estado: a.estado };
+      const color = COLORES[a.estado] || COLORES.pensando;
+      ay.anillo.material.color.set(color);
+      ay.pantalla.material.color.set(color);
+      const texto = a.tipo === 'general-purpose' ? a.nombre : a.nombre + ' · ' + a.tipo;
+      if (texto + color !== ay.firma) {
+        ay.firma = texto + color;
+        repintarEtiqueta(ay.placa, texto, { tam: 26, fijo: true, px: 19, color: '#ffffff', fondoColor: color, colorTexto: '#10131c' });
+      }
+    });
+  }
+
+  const filasAyudantes = () => {
+    let filas = 0;
+    escritorios.forEach((e) => { filas = Math.max(filas, Math.ceil(e.ayudantes.size / AYUDANTES_POR_FILA)); });
+    return filas;
+  };
 
   // ---------- Efectos ----------
   const efectos = crearEfectos(scene);
 
   // ---------- Distribución ----------
   const encuadre = { radio: 16 };
+  let filasEnSala = 0;
   function recolocar() {
     const lista = [...escritorios.values()].sort((a, b) => (a.s.inicio || 0) - (b.s.inicio || 0));
     const n = lista.length;
     const cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(n))));
     const filas = Math.max(1, Math.ceil(n / cols));
-    const dx = 7.5, dz = 7.5;
+    filasEnSala = filasAyudantes();
+    const dx = 7.5, dz = 7.5 + filasEnSala * 2.5;
     const W = Math.max(24, cols * dx + 14), D = Math.max(20, filas * dz + 12);
     if (W !== dimSala.W || D !== dimSala.D) construirSala(W, D);
     lista.forEach((e, i) => {
@@ -567,7 +617,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
       if (!e) { e = nuevoEscritorio(s); e.s = s; cambioLista = true; nuevos.push(e); }
       actualizarEscritorio(e, s);
     }
-    if (cambioLista) recolocar();
+    if (cambioLista || filasAyudantes() !== filasEnSala) recolocar();
     for (const e of nuevos) {
       const p = e.p;
       p.raiz.visible = true;
@@ -818,12 +868,12 @@ export function crearEscena(canvas, { alSeleccionar }) {
         e.ultimaParticula = t;
         efectos.codigo(tmp.set(e.g.position.x + (Math.random() - 0.5) * 1.6, 2.5, e.g.position.z - 0.45));
       }
-      // Robots de subagentes orbitando
-      e.robots.forEach((r, i) => {
-        const a = t * 0.9 + r.fase + (i / Math.max(1, e.robots.length)) * Math.PI * 2;
-        r.g.position.set(e.g.position.x + Math.cos(a) * 2.1, 2.2 + Math.sin(t * 3 + i) * 0.15 * mov, e.g.position.z + 0.4 + Math.sin(a) * 2.1);
-        r.g.rotation.y = -a;
-        r.g.userData.helice.rotation.y += dt * 25;
+      // Ayudantes: cada uno en su mesa, delante de su agente
+      e.ayudantes.forEach((ay) => {
+        const fila = Math.floor(ay.slot / AYUDANTES_POR_FILA);
+        ay.destino.set(e.destino.x + (ay.slot % AYUDANTES_POR_FILA - 1) * 2.5, 0, e.destino.z + 3.35 + fila * 2.5);
+        ay.g.position.lerp(ay.destino, 1 - Math.pow(0.001, dt));
+        animarPersonaje(ay, t, dt);
       });
       animarPersonaje(e, t, dt);
     });
