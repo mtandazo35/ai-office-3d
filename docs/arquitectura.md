@@ -71,6 +71,8 @@ Una orden se guarda en la cola de su sesión. Claude la recibe en la respuesta d
 
 **Modo guardia** (opcional, por sesión): si al terminar el turno no hay órdenes, la oficina mantiene abierta la petición `Stop` hasta que llegue una orden, se desactive la guardia o venza el plazo (`GUARDIA_MAX_MIN`, 14 min por defecto; el instalador da al hook `Stop` ese plazo más 1 min). Así un agente puede quedar «de servicio» y recibir trabajo desde la oficina. Mientras espera, la terminal queda ocupada. Si Claude Code corta la petición (Esc, Ctrl+C o el timeout del hook), la espera se libera.
 
+Solo se aceptan órdenes para sesiones abiertas y conectadas por hooks. Al llegar `SessionEnd`, las órdenes en cola se cancelan y la sesión deja de aceptar otras; una sesión detectada solo por su transcript tampoco las acepta hasta su primer evento.
+
 Las sesiones **inactivas sin guardia** no ejecutan hooks, así que sus órdenes esperan en cola hasta el próximo prompt o la próxima herramienta.
 
 **Topes de entrega.** Cada entrega lleva unos 9000 caracteres de órdenes, porque `additionalContext` admite 10.000; el resto sale en la siguiente. Claude Code ignora el `block` de `Stop` tras 8 continuaciones seguidas, así que al llegar a ese tope la orden sigue pendiente hasta la próxima herramienta o el próximo prompt.

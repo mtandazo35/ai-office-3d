@@ -330,6 +330,8 @@ class Oficina extends EventEmitter {
       case 'SessionEnd':
         s.subagentes = {};
         this.liberarEspera(s.id);
+        // Al cerrar la sesión, lo que seguía en cola ya no se entregará.
+        for (const o of this.pendientes(s)) o.estado = 'cancelada';
         this.estado(s, 'terminada');
         s.terminadaEn = this.ahora();
         this.registrar(s, 'sesion', 'Sesión terminada' + (ev.reason ? ' (' + ev.reason + ')' : ''));
@@ -362,7 +364,9 @@ class Oficina extends EventEmitter {
   nuevaOrden(id, texto) {
     const s = this.sesiones.get(id);
     if (!s) return { error: 'La sesión ya no existe.' };
-    if (s.estado === 'terminada') return { error: 'La sesión ha terminado.' };
+    if (s.estado === 'terminada') return { error: 'La sesión ha terminado: ya no recibe órdenes.' };
+    // Sin hooks no hay por dónde entregarla: quedaría en cola para siempre.
+    if (s.origen !== 'hooks') return { error: 'Esta sesión no está conectada a la oficina: no recibe órdenes.' };
     const t = typeof texto === 'string' ? texto.trim() : '';
     if (!t) return { error: 'La orden está vacía.' };
     if (t.length > 4000) return { error: 'La orden supera 4000 caracteres.' };

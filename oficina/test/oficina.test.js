@@ -734,3 +734,22 @@ test('un subagente sin eventos durante 15 min se retira, y SessionEnd los quita 
   await ev(o, 'SessionEnd', { reason: 'exit' });
   assert.equal(Object.keys(s.subagentes).length, 0);
 });
+
+test('al cerrar la sesión se cancelan sus órdenes en cola y no acepta más', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  const { orden } = o.nuevaOrden('s1', 'pendiente al cerrar');
+  await ev(o, 'SessionEnd', { reason: 'exit' });
+  assert.equal(orden.estado, 'cancelada');
+  assert.match(o.nuevaOrden('s1', 'otra').error, /terminado/);
+  assert.equal(o.sesiones.get('s1').ordenes.length, 1);
+});
+
+test('una sesión vista solo por su transcript no acepta órdenes hasta su primer hook', async () => {
+  const o = new Oficina();
+  o.descubierta('s1', { cwd: base.cwd, mtime: Date.now() });
+  assert.match(o.nuevaOrden('s1', 'hola').error, /no está conectada/);
+  assert.equal(o.sesiones.get('s1').ordenes.length, 0);
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  assert.ok(o.nuevaOrden('s1', 'hola').orden);
+});

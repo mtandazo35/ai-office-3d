@@ -184,7 +184,11 @@ function pintarDetalle() {
   // Órdenes
   const terminada = s.estado === 'terminada';
   const enviando = ordenEnviandose(s.id);
-  $('orden').disabled = terminada; $('btn-orden').disabled = terminada || enviando;
+  const sinConexion = terminada || s.origen === 'transcript';
+  $('orden').disabled = sinConexion; $('btn-orden').disabled = sinConexion || enviando;
+  $('orden').dataset.ejemplo ||= $('orden').placeholder;
+  $('orden').placeholder = terminada ? 'La sesión terminó: ya no recibe órdenes.'
+    : sinConexion ? 'Esta sesión no está conectada a la oficina: no recibe órdenes.' : $('orden').dataset.ejemplo;
   $('btn-orden').textContent = enviando ? 'Enviando…' : 'Enviar orden';
   const sinAprobacion = MODOS_SIN_APROBACION.has(s.modoPermisos);
   $('d-aviso-permisos').hidden = !sinAprobacion;

@@ -130,7 +130,7 @@
     <li><b>Reinicia las sesiones</b> de Claude Code (terminal o VS Code) para que carguen los hooks. Comprueba con <code>/hooks</code>.</li>
     <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio, con un nombre propio. En «Gestionar agentes» puedes cambiar el nombre, el rol y el género de cada uno. Pulsa sobre él para ver qué hace y darle órdenes.</li>
   </ol>
-  <p class="nota">Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el modo de permisos de cada sesión: si pide aprobación, la sigue pidiendo en la terminal o en VS Code; en modo bypass o auto, una orden se ejecuta sin que nadie apruebe nada. El detalle del agente avisa cuando es así.</p>
+  <p class="nota">Las órdenes solo llegan a sesiones abiertas y conectadas: al cerrar una sesión ya no recibe ninguna, y lo que tuviera en cola se cancela. Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el modo de permisos de cada sesión: si pide aprobación, la sigue pidiendo en la terminal o en VS Code; en modo bypass o auto, una orden se ejecuta sin que nadie apruebe nada. El detalle del agente avisa cuando es así.</p>
 </dialog>
 
 <dialog id="aviso">
