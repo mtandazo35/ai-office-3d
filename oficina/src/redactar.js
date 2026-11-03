@@ -18,11 +18,22 @@ const CLAVE_VALOR = /((?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|access[_-
 const BEARER = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/g;
 const URL_CON_CREDENCIALES = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@]+):([^\s/@]+)@/gi;
 
+// Secretos pasados como argumento de un comando.
+const ARGUMENTOS = [
+  /(\bsshpass\s+-p\s*)('[^']*'|"[^"]*"|\S+)/gi,
+  /(\s--(?:pass(?:word|wd)?|token|secret|api-?key)\s+)('[^']*'|"[^"]*"|\S+)/gi,
+  /(\bmysql(?:dump|admin)?\b[^\n]*?\s-p)(\S+)/gi,
+  /(\bcurl\b[^\n]*?\s(?:-u|--user)\s+['"]?[^:\s'"]+:)('[^']*'|"[^"]*"|[^\s'"]+)/gi
+];
+const CLAVE_ENTRECOMILLADA = /((?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*)("[^"]*"|'[^']*')/gi;
+
 function redactar(texto, max = 2000) {
   if (texto === undefined || texto === null) return '';
   let s = typeof texto === 'string' ? texto : JSON.stringify(texto);
   if (s.length > max * 4) s = s.slice(0, max * 4); // no procesar megas de texto
   for (const re of PATRONES) s = s.replace(re, '***');
+  for (const re of ARGUMENTOS) s = s.replace(re, '$1***');
+  s = s.replace(CLAVE_ENTRECOMILLADA, '$1***');
   s = s.replace(CLAVE_VALOR, '$1***');
   s = s.replace(BEARER, '$1 ***');
   s = s.replace(URL_CON_CREDENCIALES, '$1$2:***@');

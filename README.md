@@ -55,7 +55,7 @@ La oficina puede dar instrucciones a Claude, que actúa con tus permisos en el V
 - el puerto de hooks (7778) nunca se publica fuera de `127.0.0.1`;
 - exige un token en los hooks;
 - solo acepta el WebSocket desde su propia página;
-- enmascara secretos antes de mostrarlos;
+- enmascara secretos antes de mostrarlos, por patrones: no es infalible;
 - corre en un contenedor endurecido con `~/.claude` en solo lectura.
 
 Detalle en [`docs/arquitectura.md`](docs/arquitectura.md#23-seguridad).

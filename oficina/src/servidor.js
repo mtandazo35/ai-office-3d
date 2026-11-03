@@ -56,6 +56,9 @@ const transcripts = new Transcripts(oficina, { raiz: RAIZ_CLAUDE });
 const acceso = new Acceso({ password: PASSWORD, confiarProxy: env.CONFIAR_PROXY === '1' });
 
 // ---------- Utilidades de seguridad ----------
+// new URL lanza con rutas como // : sin esto, una sola petición sin autenticar tumba el proceso.
+function urlDe(req) { try { return new URL(req.url, 'http://local'); } catch { return null; } }
+
 let tokenCache = { valor: null, leido: 0 };
 function tokenEsperado() {
   if (env.AI_OFFICE_TOKEN) return env.AI_OFFICE_TOKEN;
@@ -112,7 +115,7 @@ function servirArchivo(res, base, relativa) {
   fs.stat(ruta, (err, st) => {
     if (err || !st.isFile()) return responder(res, 404, 'No encontrado');
     res.writeHead(200, { ...CABECERAS, 'Content-Type': TIPOS[path.extname(ruta)] || 'application/octet-stream', 'Cache-Control': base === THREE ? 'public, max-age=86400' : 'no-cache' });
-    fs.createReadStream(ruta).pipe(res);
+    fs.createReadStream(ruta).on('error', () => res.destroy()).pipe(res);
   });
 }
 
@@ -174,7 +177,9 @@ function salir(req, res) {
 // ---------- Panel ----------
 function panel(req, res) {
   if (!hostPermitido(req.headers.host)) return responder(res, 421, 'Host no permitido');
-  const ruta = new URL(req.url, 'http://local').pathname;
+  const u = urlDe(req);
+  if (!u) return responder(res, 400, 'URL inválida');
+  const ruta = u.pathname;
 
   if (req.method === 'POST') {
     if (ruta === '/api/hook') return void hook(req, res).catch(() => responder(res, 500, 'Error'));
@@ -201,7 +206,9 @@ function panel(req, res) {
 // Puerto solo para hooks (HTTP plano, publicado en 127.0.0.1).
 function soloHooks(req, res) {
   if (!hostLocal(req.headers.host)) return responder(res, 421, 'Host no permitido');
-  const ruta = new URL(req.url, 'http://local').pathname;
+  const u = urlDe(req);
+  if (!u) return responder(res, 400, 'URL inválida');
+  const ruta = u.pathname;
   if (req.method === 'POST' && ruta === '/api/hook') return void hook(req, res).catch(() => responder(res, 500, 'Error'));
   if (ruta === '/salud') return responder(res, 200, 'ok');
   return responder(res, 404, 'Este puerto solo recibe hooks');
@@ -214,9 +221,9 @@ function configPublica() {
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 function alActualizar(req, socket, cabeza) {
-  const url = new URL(req.url, 'http://local');
+  const url = urlDe(req);
   let codigo = 0;
-  if (url.pathname !== '/ws' || !hostPermitido(req.headers.host) || !origenPropio(req)) codigo = 403;
+  if (!url || url.pathname !== '/ws' || !hostPermitido(req.headers.host) || !origenPropio(req)) codigo = 403;
   else if (!acceso.autorizada(req)) codigo = 401;
   if (codigo) { socket.write(`HTTP/1.1 ${codigo} ${codigo === 401 ? 'Unauthorized' : 'Forbidden'}\r\n\r\n`); socket.destroy(); return; }
   wss.handleUpgrade(req, socket, cabeza, (ws) => { ws.token = acceso.tokenDe(req); wss.emit('connection', ws, req); });
@@ -228,6 +235,8 @@ function enviarTodos(msg) {
 }
 
 wss.on('connection', (ws) => {
+  // Sin este manejador, un frame inválido o de más de 64 KB tumba el proceso.
+  ws.on('error', (e) => log('ws', e.message));
   ws.send(JSON.stringify({ t: 'snapshot', sesiones: oficina.instantanea(), perfiles: oficina.listaPerfiles(), config: configPublica() }));
   let cuenta = 0, ventana = Date.now();
   ws.on('message', (raw) => {

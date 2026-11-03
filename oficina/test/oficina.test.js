@@ -136,6 +136,26 @@ test('enmascara secretos y recorta', () => {
   assert.equal(redactar('x'.repeat(50), 10).length, 12);
 });
 
+test('enmascara secretos pasados como argumento o entrecomillados', () => {
+  const casos = [
+    ["sshpass -p 'Clave 1' ssh root@host", 'Clave'],
+    ['sshpass -pClave2 ssh root@host', 'Clave2'],
+    ['mysql -uroot -pClave3 base', 'Clave3'],
+    ['tool --password Clave4', 'Clave4'],
+    ['tool --token "Clave 5"', 'Clave'],
+    ['curl -u admin:Clave6 https://x.example', 'Clave6'],
+    ['curl --user "admin:Clave7" https://x.example', 'Clave7'],
+    ['password="a b"', 'a b'],
+    ["export PASSWORD='Clave 8'", 'Clave'],
+    ['{"token": "Clave 9"}', 'Clave']
+  ];
+  for (const [entrada, secreto] of casos) assert.ok(!redactar(entrada).includes(secreto), entrada + ' => ' + redactar(entrada));
+  // Lo que no es secreto se sigue leyendo.
+  assert.equal(redactar('mysql -u root -p base'), 'mysql -u root -p base');
+  assert.equal(redactar('curl -u admin https://x.example'), 'curl -u admin https://x.example');
+  assert.equal(redactar('npm test -- --watch'), 'npm test -- --watch');
+});
+
 test('las rutas de transcripts no salen del montaje', () => {
   const t = new Transcripts(new Oficina(), { raiz: '/claude' });
   assert.equal(t.rutaLocal('/home/m/.claude/projects/p/s.jsonl'), '/claude/projects/p/s.jsonl');

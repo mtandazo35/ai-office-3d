@@ -1,0 +1,89 @@
+'use strict';
+// Pruebas contra el servidor real, en un proceso aparte: un fallo aquí es un proceso muerto.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const net = require('node:net');
+const os = require('node:os');
+const path = require('node:path');
+const WebSocket = require('ws');
+
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function puertoLibre() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.on('error', reject);
+    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+  });
+}
+
+async function levantar(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-srv-'));
+  const panel = await puertoLibre(), hooks = await puertoLibre();
+  const hijo = spawn(process.execPath, ['src/servidor.js'], {
+    cwd: path.join(__dirname, '..'), stdio: 'ignore',
+    env: { ...process.env, ESCUCHA: '127.0.0.1', PUBLICAR_IP: '127.0.0.1', AI_OFFICE_DEMO: '0', OFICINA_PASSWORD: '', TLS: '0', PUERTO_INTERNO: String(panel), PUERTO_HOOKS_INTERNO: String(hooks), CLAUDE_DIR_CONTENEDOR: dir, DATOS_DIR: dir }
+  });
+  const srv = { hijo, panel, hooks, muerto: false };
+  hijo.on('exit', () => { srv.muerto = true; });
+  t.after(async () => {
+    hijo.kill();
+    await dormir(200);
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+  for (let i = 0; i < 50; i++) {
+    try { if ((await fetch(`http://127.0.0.1:${hooks}/salud`)).ok) return srv; } catch { /* aún arranca */ }
+    await dormir(100);
+  }
+  throw new Error('el servidor no arrancó');
+}
+
+// Petición cruda: fetch normaliza la ruta y nunca enviaría // tal cual.
+function crudo(puerto, texto) {
+  return new Promise((resolve, reject) => {
+    let datos = '';
+    const s = net.connect(puerto, '127.0.0.1', () => s.write(texto));
+    s.on('data', (d) => { datos += d; });
+    s.on('close', () => resolve(datos));
+    s.on('error', reject);
+    s.setTimeout(3000, () => s.destroy());
+  });
+}
+const peticion = (ruta) => `GET ${ruta} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`;
+
+test('una URL inválida responde 400 y no tumba el proceso', async (t) => {
+  const srv = await levantar(t);
+  for (const puerto of [srv.panel, srv.hooks]) {
+    for (const ruta of ['//', '//:', 'http://']) {
+      const r = await crudo(puerto, peticion(ruta));
+      assert.match(r, /^HTTP\/1\.1 400/, `ruta ${ruta} en ${puerto}: ${r.slice(0, 40)}`);
+    }
+  }
+  await dormir(200);
+  assert.equal(srv.muerto, false);
+  assert.equal((await fetch(`http://127.0.0.1:${srv.panel}/salud`)).status, 200);
+});
+
+test('una mejora a WebSocket con URL inválida se rechaza sin tumbar el proceso', async (t) => {
+  const srv = await levantar(t);
+  const r = await crudo(srv.panel, 'GET // HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n');
+  assert.match(r, /^HTTP\/1\.1 403/);
+  await dormir(200);
+  assert.equal(srv.muerto, false);
+});
+
+test('un mensaje de más de 64 KB cierra ese WebSocket y el servidor sigue vivo', async (t) => {
+  const srv = await levantar(t);
+  const origen = `http://127.0.0.1:${srv.panel}`;
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.panel}/ws`, { origin: origen });
+  ws.on('error', () => {});
+  await new Promise((resolve, reject) => { ws.on('open', resolve); ws.on('unexpected-response', () => reject(new Error('rechazado'))); });
+  const cierre = new Promise((resolve) => ws.on('close', resolve));
+  ws.send('x'.repeat(70000));
+  assert.equal(await cierre, 1009);
+  await dormir(200);
+  assert.equal(srv.muerto, false);
+  assert.equal((await fetch(`${origen}/salud`)).status, 200);
+});
