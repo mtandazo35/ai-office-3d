@@ -1,15 +1,19 @@
 'use strict';
-// Acceso al panel cuando la oficina se publica fuera de localhost (p. ej. en la IP de un VPS):
-// contraseña -> cookie de sesión HttpOnly + SameSite=Strict, con bloqueo por intentos fallidos.
+// Acceso al panel, siempre con credencial: contraseña propia, o en local un secreto generado en un
+// archivo solo para el dueño y un enlace de un solo uso. Da una cookie de sesión HttpOnly +
+// SameSite=Strict, con bloqueo por intentos fallidos.
 
 const crypto = require('crypto');
+const fs = require('fs');
 const net = require('net');
+const path = require('path');
 
 const DURACION_MS = 12 * 3600 * 1000;      // la sesión dura 12 h
 const VENTANA_FALLOS_MS = 10 * 60 * 1000;   // 5 fallos en 10 min...
 const MAX_FALLOS = 5;
 const BLOQUEO_MS = 15 * 60 * 1000;          // ...bloquean esa IP 15 min
 const COOKIE = 'oficina_sesion';
+const DURACION_ENLACE_MS = 15 * 60 * 1000; // el enlace de un solo uso caduca a los 15 min
 const MAX_IPS = 10000;                      // IPs recordadas como mucho en el mapa de intentos
 const MAX_SCRYPT_SIMULTANEOS = 2;           // deja libres hilos de libuv para el resto del servidor
 const MAX_SCRYPT_EN_COLA = 16;              // más allá de esto se rechaza sin comprobar
@@ -23,12 +27,33 @@ function direccionesEscucha({ escucha, publicarIp, remoto }) {
   return { panel: (remoto && publicarIp) || '127.0.0.1', hooks: '127.0.0.1' };
 }
 
+// Secreto del panel en modo local: se crea una vez y solo debe poder leerlo el dueño.
+function obtenerSecreto(archivo, log = () => {}) {
+  try {
+    const guardado = fs.readFileSync(archivo, 'utf8').trim();
+    if (guardado.length >= 32) {
+      try { fs.chmodSync(archivo, 0o600); } catch { /* en Windows manda la ACL de la carpeta */ }
+      return guardado;
+    }
+  } catch { /* todavía no existe */ }
+  const nuevo = crypto.randomBytes(32).toString('base64url');
+  try {
+    fs.mkdirSync(path.dirname(archivo), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(archivo, nuevo + '\n', { mode: 0o600 });
+    fs.chmodSync(archivo, 0o600);
+  } catch (e) {
+    log('Aviso: no pude guardar el secreto del panel (' + e.message + '); solo valdrá hasta el próximo arranque.');
+  }
+  return nuevo;
+}
+
 class Acceso {
   constructor({ password, confiarProxy = false, ahora = () => Date.now() } = {}) {
     this.activo = !!password;
     this.confiarProxy = confiarProxy;
     this.ahora = ahora;
     this.sesiones = new Map();   // token -> caduca
+    this.enlaces = new Map();    // token de un solo uso -> caduca
     this.intentos = new Map();   // ip -> { fallos, desde, hasta }
     this.scryptEnCurso = 0;
     this.scryptCola = [];        // quienes esperan turno para derivar
@@ -106,9 +131,27 @@ class Acceso {
     this.contarFallo(ip, t);
     if (!(await this.comprobar(password))) return { ok: false, error: 'Contraseña incorrecta.' };
     this.intentos.delete(ip);
+    return { ok: true, token: this.nuevaSesion(t) };
+  }
+
+  nuevaSesion(t = this.ahora()) {
     const token = crypto.randomBytes(32).toString('base64url');
     this.sesiones.set(token, t + DURACION_MS);
-    return { ok: true, token };
+    return token;
+  }
+
+  crearEnlace() {
+    const token = crypto.randomBytes(32).toString('base64url');
+    this.enlaces.set(token, this.ahora() + DURACION_ENLACE_MS);
+    return token;
+  }
+
+  // Devuelve una sesión nueva, o null. El enlace se gasta al primer intento.
+  canjearEnlace(token) {
+    if (typeof token !== 'string') return null;
+    const caduca = this.enlaces.get(token);
+    this.enlaces.delete(token);
+    return caduca && caduca >= this.ahora() ? this.nuevaSesion() : null;
   }
 
   cookieSesion(req, token) {
@@ -147,8 +190,9 @@ class Acceso {
   limpiar() {
     const t = this.ahora();
     for (const [k, v] of this.sesiones) if (v < t) this.sesiones.delete(k);
+    for (const [k, v] of this.enlaces) if (v < t) this.enlaces.delete(k);
     for (const [k, v] of this.intentos) if ((!v.hasta || v.hasta < t) && t - v.desde > VENTANA_FALLOS_MS) this.intentos.delete(k);
   }
 }
 
-module.exports = { Acceso, COOKIE, MAX_IPS, direccionesEscucha };
+module.exports = { Acceso, COOKIE, MAX_IPS, direccionesEscucha, obtenerSecreto };

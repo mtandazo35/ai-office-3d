@@ -15,7 +15,7 @@ form.addEventListener('submit', async (ev) => {
     });
     if (r.ok) { location.replace('/'); return; }
     const d = await r.json().catch(() => ({}));
-    error.textContent = d.esperaSeg ? `${d.error} (${Math.ceil(d.esperaSeg / 60)} min)` : (d.error || 'No se pudo entrar.');
+    error.textContent = d.esperaSeg ? `${d.error} (${d.esperaSeg < 60 ? d.esperaSeg + ' s' : Math.ceil(d.esperaSeg / 60) + ' min'})` : (d.error || 'No se pudo entrar.');
   } catch {
     error.textContent = 'No hay conexión con la oficina.';
   } finally {

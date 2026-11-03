@@ -23,10 +23,11 @@ async function levantar(t, extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-srv-'));
   const panel = await puertoLibre(), hooks = await puertoLibre();
   const hijo = spawn(process.execPath, ['src/servidor.js'], {
-    cwd: path.join(__dirname, '..'), stdio: 'ignore',
+    cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'],
     env: { ...process.env, ESCUCHA: '127.0.0.1', PUBLICAR_IP: '127.0.0.1', AI_OFFICE_DEMO: '0', OFICINA_PASSWORD: '', TLS: '0', PUERTO_INTERNO: String(panel), PUERTO_HOOKS_INTERNO: String(hooks), CLAUDE_DIR_CONTENEDOR: dir, DATOS_DIR: dir, ...extra }
   });
-  const srv = { hijo, panel, hooks, muerto: false };
+  const srv = { hijo, panel, hooks, dir, muerto: false, log: '' };
+  hijo.stdout.on('data', (d) => { srv.log += d; });
   hijo.on('exit', () => { srv.muerto = true; });
   t.after(async () => {
     hijo.kill();
@@ -51,6 +52,14 @@ function crudo(puerto, texto) {
     s.setTimeout(3000, () => s.destroy());
   });
 }
+// Sesión real, con el secreto que el servidor generó en su carpeta de datos.
+async function cookieDe(srv) {
+  const password = fs.readFileSync(path.join(srv.dir, 'panel-secreto'), 'utf8').trim();
+  const r = await fetch('http://127.0.0.1:' + srv.panel + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+  assert.equal(r.status, 200);
+  return r.headers.get('set-cookie').split(';')[0];
+}
+
 const peticion = (ruta) => `GET ${ruta} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`;
 
 test('una URL inválida responde 400 y no tumba el proceso', async (t) => {
@@ -77,7 +86,7 @@ test('una mejora a WebSocket con URL inválida se rechaza sin tumbar el proceso'
 test('un mensaje de más de 64 KB cierra ese WebSocket y el servidor sigue vivo', async (t) => {
   const srv = await levantar(t);
   const origen = `http://127.0.0.1:${srv.panel}`;
-  const ws = new WebSocket(`ws://127.0.0.1:${srv.panel}/ws`, { origin: origen });
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.panel}/ws`, { origin: origen, headers: { Cookie: await cookieDe(srv) } });
   ws.on('error', () => {});
   await new Promise((resolve, reject) => { ws.on('open', resolve); ws.on('unexpected-response', () => reject(new Error('rechazado'))); });
   const cierre = new Promise((resolve) => ws.on('close', resolve));
@@ -123,4 +132,87 @@ test('un ataque en paralelo con X-Forwarded-For falso queda bloqueado y /salud s
   assert.equal((await entrar(srv.panel, CLAVE, '198.51.100.200, 203.0.113.50')).status, 429);
   // Otra IP real, la que escribió el proxy, no queda afectada.
   assert.equal((await entrar(srv.panel, CLAVE, '203.0.113.51')).status, 200);
+});
+
+// El atacante es un programa local: fija Origin y Host a voluntad.
+function abrirWs(srv, cookie) {
+  return new Promise((resolve) => {
+    const ws = new WebSocket('ws://127.0.0.1:' + srv.panel + '/ws', { origin: 'http://127.0.0.1:' + srv.panel, headers: cookie ? { Cookie: cookie } : {} });
+    ws.on('open', () => { ws.terminate(); resolve('abierto'); });
+    ws.on('unexpected-response', (_q, r) => { ws.terminate(); resolve(r.statusCode); });
+    ws.on('error', () => {});
+  });
+}
+
+test('en local, sin credencial no se ve el panel ni se abre el WebSocket aunque se falsifique Origin', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t);
+  const base = 'http://127.0.0.1:' + srv.panel;
+  assert.equal(await abrirWs(srv), 401);
+  assert.equal((await fetch(base + '/api/estado')).status, 401);
+  assert.equal((await fetch(base + '/app.js')).status, 401);
+  const r = await fetch(base + '/', { redirect: 'manual' });
+  assert.equal(r.status, 302);
+  assert.equal(r.headers.get('location'), '/login.html');
+  assert.equal(await abrirWs(srv, 'oficina_sesion=inventada'), 401);
+  assert.equal(await abrirWs(srv, await cookieDe(srv)), 'abierto');
+});
+
+test('el enlace de un solo uso da sesión una sola vez', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t);
+  const token = srv.log.match(/entrar\?c=(\S+)/)[1];
+  const base = 'http://127.0.0.1:' + srv.panel;
+  const mala = await fetch(base + '/entrar?c=inventado', { redirect: 'manual' });
+  assert.equal(mala.headers.get('location'), '/login.html');
+  assert.equal(mala.headers.get('set-cookie'), null);
+  assert.equal((await fetch(base + '/entrar', { method: 'HEAD', redirect: 'manual' })).headers.get('set-cookie'), null);
+  const buena = await fetch(base + '/entrar?c=' + token, { redirect: 'manual' });
+  assert.equal(buena.headers.get('location'), '/');
+  const cookie = buena.headers.get('set-cookie').split(';')[0];
+  assert.match(buena.headers.get('set-cookie'), /HttpOnly/);
+  assert.equal((await fetch(base + '/api/estado', { headers: { Cookie: cookie } })).status, 200);
+  const otra = await fetch(base + '/entrar?c=' + token, { redirect: 'manual' });
+  assert.equal(otra.headers.get('location'), '/login.html');
+  assert.equal(otra.headers.get('set-cookie'), null);
+});
+
+test('el log muestra el enlace y la ruta, nunca el secreto', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t);
+  const secreto = fs.readFileSync(path.join(srv.dir, 'panel-secreto'), 'utf8').trim();
+  assert.ok(secreto.length >= 32);
+  assert.match(srv.log, /panel-secreto/);
+  assert.ok(!srv.log.includes(secreto));
+});
+
+test('en local, un Host ajeno sigue recibiendo 421 aunque haya credencial (DNS rebinding)', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t);
+  const r = await crudo(srv.panel, 'GET / HTTP/1.1\r\nHost: malicioso.example\r\nConnection: close\r\n\r\n');
+  assert.match(r, /^HTTP\/1\.1 421/);
+});
+
+test('con contraseña propia no se genera secreto ni enlace', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t, { OFICINA_PASSWORD: CLAVE });
+  assert.equal(fs.existsSync(path.join(srv.dir, 'panel-secreto')), false);
+  assert.ok(!srv.log.includes('entrar?c='));
+});
+
+test('en modo remoto no arranca sin una contraseña de al menos 12 caracteres', { timeout: 20000 }, async () => {
+  for (const clave of ['', 'corta']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-srv-'));
+    const hijo = spawn(process.execPath, ['src/servidor.js'], {
+      cwd: path.join(__dirname, '..'), stdio: 'ignore',
+      env: { ...process.env, ESCUCHA: '127.0.0.1', ACCESO_REMOTO: '1', OFICINA_PASSWORD: clave, OFICINA_PASSWORD_FILE: '', AI_OFFICE_DEMO: '0', TLS: '0', PUERTO_INTERNO: String(await puertoLibre()), PUERTO_HOOKS_INTERNO: String(await puertoLibre()), CLAUDE_DIR_CONTENEDOR: dir, DATOS_DIR: dir }
+    });
+    const codigo = await new Promise((resolve) => hijo.on('exit', resolve));
+    assert.equal(codigo, 1, 'clave ' + JSON.stringify(clave));
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('OFICINA_PASSWORD_FILE sirve como contraseña', { timeout: 20000 }, async (t) => {
+  const archivo = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-clave-')), 'clave');
+  fs.writeFileSync(archivo, CLAVE + '\n');
+  t.after(() => fs.rmSync(path.dirname(archivo), { recursive: true, force: true }));
+  const srv = await levantar(t, { OFICINA_PASSWORD_FILE: archivo, ACCESO_REMOTO: '1' });
+  assert.equal((await entrar(srv.panel, 'otra-clave-larga-456')).status, 401);
+  assert.equal((await entrar(srv.panel, CLAVE)).status, 200);
 });

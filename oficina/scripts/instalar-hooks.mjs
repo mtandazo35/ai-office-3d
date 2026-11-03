@@ -109,13 +109,20 @@ if (Object.keys(hooks).length) ajustes.hooks = hooks; else delete ajustes.hooks;
 if (fs.existsSync(ARCHIVO)) {
   const copia = `${ARCHIVO}.bak-ai-office-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   fs.copyFileSync(ARCHIVO, copia);
+  try { fs.chmodSync(copia, 0o600); } catch { /* en Windows manda la ACL de la carpeta */ }
   console.log(`Copia de seguridad: ${copia}`);
 }
 const tmp = `${ARCHIVO}.tmp-ai-office`;
+// settings.json lleva el token de los hooks: solo debe poder leerlo el dueño.
 let modo = 0o600;
-try { modo = fs.statSync(ARCHIVO).mode & 0o777; } catch {}
+try {
+  const actual = fs.statSync(ARCHIVO).mode & 0o777;
+  modo = (actual & ~0o077) || 0o600;
+  if (process.platform !== 'win32' && actual & 0o077) console.log(`Aviso: ${ARCHIVO} tenía permisos ${actual.toString(8)}; lo dejo en ${modo.toString(8)} porque guarda un token.`);
+} catch {}
 try {
   fs.writeFileSync(tmp, JSON.stringify(ajustes, null, 2) + '\n', { mode: modo });
+  fs.chmodSync(tmp, modo);
   fs.renameSync(tmp, ARCHIVO);
 } catch (e) {
   try { fs.unlinkSync(tmp); } catch {}
@@ -127,6 +134,7 @@ const NOMBRE_COPIA = /^settings\.json\.bak-ai-office-\d{4}-\d{2}-\d{2}T\d{2}-\d{
 try {
   const copias = fs.readdirSync(DIR, { withFileTypes: true }).filter((d) => d.isFile() && NOMBRE_COPIA.test(d.name)).map((d) => d.name).sort();
   for (const nombre of copias.slice(0, -COPIAS_A_CONSERVAR)) fs.unlinkSync(path.join(DIR, nombre));
+  for (const nombre of copias.slice(-COPIAS_A_CONSERVAR)) fs.chmodSync(path.join(DIR, nombre), 0o600);
 } catch (e) {
   console.error(`Aviso: no pude borrar copias antiguas: ${e.message}`);
 }

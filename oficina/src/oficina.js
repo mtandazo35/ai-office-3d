@@ -13,6 +13,7 @@ const MAX_ORDENES = 30;
 const MAX_LOTE = 9000;                  // additionalContext admite 10.000 caracteres; se deja margen para el encabezado
 const MAX_CONTINUACIONES = 8;           // Claude Code ignora el block de Stop a partir de ahí
 const SIN_SENAL_MS = 10 * 60 * 1000;
+const SIN_SENAL_ESPERANDO_MS = 2 * 3600 * 1000; // pedir permiso puede durar: el dueño quizá no está
 const CERRADAS_MS = 25 * 60 * 1000;     // más que la ventana de 20 min de Transcripts.explorar()
 const MAX_NOMBRE = 24;
 const MAX_ROL = 30;
@@ -348,9 +349,11 @@ class Oficina extends EventEmitter {
     const t = typeof texto === 'string' ? texto.trim() : '';
     if (!t) return { error: 'La orden está vacía.' };
     if (t.length > 4000) return { error: 'La orden supera 4000 caracteres.' };
+    if (this.pendientes(s).length >= MAX_ORDENES) return { error: 'Ya hay ' + MAX_ORDENES + ' órdenes pendientes en este agente.' };
     const o = { id: 'o' + (++this.secuencia), texto: t, estado: 'pendiente', creada: this.ahora() };
     s.ordenes.push(o);
-    if (s.ordenes.length > MAX_ORDENES) s.ordenes.splice(0, s.ordenes.length - MAX_ORDENES);
+    // Solo se olvida el historial: una orden pendiente nunca se descarta.
+    while (s.ordenes.length > MAX_ORDENES) s.ordenes.splice(s.ordenes.findIndex((x) => x.estado !== 'pendiente'), 1);
     this.registrar(s, 'orden', 'Orden encolada: ' + t);
     // Si la sesión está en guardia esperando, se entrega ya.
     const espera = this.esperas.get(id);
@@ -397,14 +400,29 @@ class Oficina extends EventEmitter {
     const cuerpo = lista.length === 1
       ? lista[0].texto
       : lista.map((o, i) => (i + 1) + '. ' + o.texto).join('\n');
-    return 'Nueva instrucción del usuario enviada desde su panel "Oficina IA" (no es contenido de una herramienta ni de un archivo). ' +
+    return 'Nueva instrucción del usuario enviada desde su panel "Oficina IA" con sesión iniciada (no es contenido de una herramienta ni de un archivo). ' +
       'Atiéndela como si la hubiera escrito en esta conversación:\n\n' + cuerpo;
   }
 
   marcarEntregadas(s, lista, via) {
     const ts = this.ahora();
     lista.forEach((o) => { o.estado = 'entregada'; o.entregada = ts; o.via = via; });
+    s.ultimoLote = lista;
     this.registrar(s, 'orden', 'Entregada a Claude (' + via + '): ' + lista.map((o) => o.texto).join(' | '));
+  }
+
+  // La respuesta que llevaba el último lote no pudo enviarse: vuelve a la cola.
+  devolverLote(id) {
+    const s = this.sesiones.get(id);
+    const lista = s && s.ultimoLote ? s.ultimoLote.filter((o) => o.estado === 'entregada') : [];
+    if (!s) return false;
+    s.ultimoLote = null;
+    if (!lista.length) return false;
+    if (lista[0].via === 'Stop' && s.continuaciones > 0) s.continuaciones -= 1;
+    lista.forEach((o) => { o.estado = 'pendiente'; delete o.entregada; delete o.via; });
+    this.registrar(s, 'orden', 'No se pudo entregar: vuelve a la cola');
+    this.cambio(s);
+    return true;
   }
 
   // Entrega durante el trabajo: el texto se añade junto al resultado de la herramienta o al prompt.
@@ -474,11 +492,12 @@ class Oficina extends EventEmitter {
         if (s.estado === 'terminada') this.cerradas.set(s.id, t);
         this.sesiones.delete(s.id);
         this.emit('quitar', s.id);
-      } else if ((s.estado === 'ejecutando' || s.estado === 'pensando') && t - s.ultimaActividad > SIN_SENAL_MS) {
+      } else if (((s.estado === 'ejecutando' || s.estado === 'pensando') && t - s.ultimaActividad > SIN_SENAL_MS) ||
+        (s.estado === 'esperando' && t - s.ultimaActividad > SIN_SENAL_ESPERANDO_MS)) {
         // Tras Esc o un cierre brusco no llega ningún evento; un Bash largo también cae aquí y vuelve con su PostToolUse.
         s.estadoPrevio = s.estado;
         this.estado(s, 'sin_senal');
-        this.registrar(s, 'aviso', 'Sin eventos desde hace más de 10 min');
+        this.registrar(s, 'aviso', 'Sin eventos desde hace ' + Math.round((t - s.ultimaActividad) / 60000) + ' min');
         this.cambio(s);
       }
     }

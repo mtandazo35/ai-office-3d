@@ -3,8 +3,8 @@
 // lo transmite por WebSocket a la oficina 3D y entrega las órdenes del usuario a Claude.
 //
 // Dos puertos:
-//   PUERTO (7777)        panel web + WebSocket. Local, o publicado en la IP del VPS con
-//                        contraseña y HTTPS.
+//   PUERTO (7777)        panel web + WebSocket, siempre con credencial. Local (secreto generado y
+//                        enlace de un solo uso), o publicado en la IP del VPS con contraseña y HTTPS.
 //   PUERTO_HOOKS (7778)  solo /api/hook en HTTP plano, para Claude Code en la misma máquina.
 //                        Sin Docker escucha solo en 127.0.0.1; el compose lo publica únicamente ahí.
 
@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Oficina } = require('./oficina');
 const { Transcripts } = require('./transcripts');
-const { Acceso, direccionesEscucha } = require('./acceso');
+const { Acceso, direccionesEscucha, obtenerSecreto } = require('./acceso');
 const tls = require('./tls');
 
 const env = process.env;
@@ -53,7 +53,10 @@ if (REMOTO && PASSWORD.length < 12) {
 
 const oficina = new Oficina({ guardiaMaxMs: GUARDIA_MAX_MIN * 60 * 1000, archivoPerfiles: path.join(DATOS, 'perfiles.json') });
 const transcripts = new Transcripts(oficina, { raiz: RAIZ_CLAUDE });
-const acceso = new Acceso({ password: PASSWORD, confiarProxy: env.CONFIAR_PROXY === '1' });
+// Sin contraseña propia, el secreto generado hace de contraseña: Origin y Host no bastan como barrera,
+// porque cualquier programa del equipo los falsifica.
+const ARCHIVO_SECRETO = path.join(DATOS, 'panel-secreto');
+const acceso = new Acceso({ password: PASSWORD || obtenerSecreto(ARCHIVO_SECRETO, log), confiarProxy: env.CONFIAR_PROXY === '1' });
 
 // ---------- Utilidades de seguridad ----------
 // new URL lanza con rutas como // : sin esto, una sola petición sin autenticar tumba el proceso.
@@ -79,9 +82,9 @@ function hostLocal(host) {
   const h = sinPuerto(host);
   return h === 'localhost' || h === '127.0.0.1' || h === '::1' || HOSTS_EXTRA.includes(h);
 }
-// Sin contraseña solo se atienden nombres locales (defensa contra DNS rebinding).
-// Con contraseña cualquier Host vale: protege la sesión, y la cookie va ligada al host.
-function hostPermitido(host) { return !!host && (acceso.activo || hostLocal(host)); }
+// Sin contraseña propia solo se atienden nombres locales (defensa contra DNS rebinding).
+// Con ella cualquier Host vale: protege la sesión, y la cookie va ligada al host.
+function hostPermitido(host) { return !!host && (!!PASSWORD || hostLocal(host)); }
 
 // El WebSocket y las acciones del panel solo se aceptan desde la propia página.
 function origenPropio(req) {
@@ -89,7 +92,7 @@ function origenPropio(req) {
   if (!o) return false;
   try {
     const u = new URL(o);
-    return u.host.toLowerCase() === String(req.headers.host).toLowerCase() && (acceso.activo || hostLocal(u.host));
+    return u.host.toLowerCase() === String(req.headers.host).toLowerCase() && (!!PASSWORD || hostLocal(u.host));
   } catch { return false; }
 }
 
@@ -145,7 +148,11 @@ async function hook(req, res) {
   try { salida = await oficina.procesar(ev); } catch (e) { log('error procesando hook', e); }
   const s = ev && ev.session_id && oficina.sesiones.get(ev.session_id);
   if (s && /^(Stop|PostToolUse|SubagentStop|SessionStart)$/.test(ev.hook_event_name)) transcripts.programar(s);
-  if (res.writableEnded || res.destroyed) return;
+  if (res.writableEnded || res.destroyed) {
+    // Nadie va a leer esta respuesta: las órdenes que llevaba vuelven a la cola.
+    if (salida) oficina.devolverLote(ev.session_id);
+    return;
+  }
   if (salida) json(res, 200, salida);
   else responder(res, 200, '');
 }
@@ -188,6 +195,12 @@ function panel(req, res) {
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return responder(res, 405, 'Método no permitido');
   if (ruta === '/salud') return responder(res, 200, 'ok');
+  if (ruta === '/entrar' && req.method === 'GET') {
+    const sesion = acceso.canjearEnlace(u.searchParams.get('c'));
+    if (!sesion) return responder(res, 302, '', null, { Location: '/login.html' });
+    log('Acceso correcto con el enlace de un solo uso');
+    return responder(res, 302, '', null, { Location: '/', 'Set-Cookie': acceso.cookieSesion(req, sesion) });
+  }
   if (PUBLICOS_SIN_SESION.has(ruta)) {
     if (ruta === '/login.html' && (!acceso.activo || acceso.autorizada(req))) return responder(res, 302, '', null, { Location: '/' });
     return servirArchivo(res, PUBLICO, ruta.slice(1));
@@ -283,7 +296,11 @@ async function arrancar() {
   const principal = cred ? https.createServer({ cert: cred.cert, key: cred.key, minVersion: 'TLSv1.2' }, panel) : http.createServer(panel);
   principal.on('upgrade', alActualizar);
   principal.listen(PUERTO, ESCUCHA, () => {
-    log(`Panel: ${cred ? 'https' : 'http'}://<host>:${PUERTO}` + (acceso.activo ? ' (con contraseña)' : ' (sin contraseña: solo uso local)') + (DEMO ? ' · modo demo' : ''));
+    log(`Panel: ${cred ? 'https' : 'http'}://<host>:${PUERTO}` + (PASSWORD ? ' (con contraseña)' : ' (solo local, con secreto generado)') + (DEMO ? ' · modo demo' : ''));
+    if (!PASSWORD) {
+      log(`Entra con este enlace de un solo uso (caduca en 15 min): ${cred ? 'https' : 'http'}://127.0.0.1:${env.PUERTO_PUBLICO || PUERTO}/entrar?c=${acceso.crearEnlace()}`);
+      log(`Después, o si caduca, la contraseña de la pantalla de acceso es el contenido de ${ARCHIVO_SECRETO}`);
+    }
   });
   const ganchos = http.createServer(soloHooks);
   ganchos.listen(PUERTO_HOOKS, ESCUCHA_HOOKS, () => log(`Hooks: http://127.0.0.1:${PUERTO_HOOKS}/api/hook`));

@@ -32,10 +32,10 @@ docker compose logs oficina | grep SHA-256           # huella del certificado
 
 Abre `https://IP_DEL_VPS:7777`. El navegador avisará de que el certificado no es de confianza porque es autofirmado: comprueba que la huella SHA-256 coincide con la del log y acéptalo. Entra con la contraseña (`grep OFICINA_PASSWORD .env`). Por último, reinicia tus sesiones de Claude Code en el VPS (con `/hooks` compruebas que están cargados).
 
-- **Cortafuegos:** abre solo el puerto 7777, mejor limitado a tus IPs (p. ej. `ufw allow from TU_IP to any port 7777 proto tcp`). El 7778 de los hooks queda en 127.0.0.1 y no hay que abrirlo.
+- **Cortafuegos:** limita el 7777 a tus IPs con el cortafuegos de tu proveedor o con la cadena `DOCKER-USER` de iptables. **`ufw allow` no sirve aquí:** Docker publica el puerto con sus propias reglas, que se saltan UFW, y el panel seguiría abierto a internet. El 7778 de los hooks queda en 127.0.0.1 y no hay que abrirlo.
 - **Con dominio y Nginx Proxy Manager:** sigue la [receta de abajo](#con-dominio-y-nginx-proxy-manager).
 - **Claude Code en tu PC y la oficina en el VPS:** abre un túnel `ssh -N -L 7778:127.0.0.1:7778 usuario@VPS` y, en el PC, instala los hooks con el token del VPS: `AI_OFFICE_TOKEN=$(ssh usuario@VPS cat ~/.claude/ai-office/token) node oficina/scripts/instalar-hooks.mjs`. Así no expones el puerto de hooks.
-- **Solo en local** (sin VPS): deja `PUBLICAR_IP=127.0.0.1`. Se abre en `http://127.0.0.1:7777` sin contraseña.
+- **Solo en local** (sin VPS): deja `PUBLICAR_IP=127.0.0.1`. Al arrancar, el log muestra un enlace de un solo uso que caduca en 15 min (`docker compose logs oficina | grep entrar`). Si caduca, la contraseña de la pantalla de acceso es el contenido de `panel-secreto`, en la carpeta de datos (`docker compose exec oficina cat /datos/panel-secreto`; sin Docker, `oficina/datos/panel-secreto`).
 - **Sin Docker:** `cd oficina && npm ci && npm start`. Escucha solo en `127.0.0.1`. Para abrir el panel, define `PUBLICAR_IP` y `OFICINA_PASSWORD`: el panel escucha en esa IP y los hooks siguen en `127.0.0.1`.
 - **Probar sin Claude Code:** `AI_OFFICE_DEMO=1 docker compose up --build` muestra tres agentes simulados que también obedecen órdenes. Sin Docker, `npm run demo` dentro de `oficina/`, también en Windows.
 - **Desinstalar los hooks:** `docker compose run --rm instalar --desinstalar`. Solo se quitan las entradas de la oficina; antes de cada cambio queda una copia `settings.json.bak-ai-office-…`, y se conservan las 5 más recientes.
@@ -54,7 +54,7 @@ NPM suele correr en su propio contenedor: para él, `127.0.0.1` es él mismo y n
    OFICINA_PASSWORD=...
    ```
 
-   **La contraseña es obligatoria en este modo.** Con `ACCESO_REMOTO=1` el servidor no arranca sin una de al menos 12 caracteres. Sin ese ajuste arrancaría en modo local y respondería 421 a tu dominio.
+   **La contraseña es obligatoria en este modo.** Con `ACCESO_REMOTO=1` el servidor no arranca sin una de al menos 12 caracteres. Sin ese ajuste, una contraseña vacía o corta no impediría arrancar, y el panel respondería 421 a tu dominio.
 2. Busca la red de NPM: `docker inspect -f '{{json .NetworkSettings.Networks}}' CONTENEDOR_DE_NPM`.
 3. Crea `docker-compose.override.yml` junto al compose (git lo ignora y Compose lo carga solo):
 
@@ -107,7 +107,7 @@ secrets:
 La oficina puede dar instrucciones a Claude, que actúa con tus permisos en el VPS. Por eso:
 - en modo VPS o con `ACCESO_REMOTO=1` exige contraseña (se niega a arrancar sin ella) y bloquea una IP 15 min tras 5 fallos; en modo VPS usa además HTTPS;
 - la sesión es una cookie `HttpOnly` + `SameSite=Strict` de 12 h;
-- en modo local solo se publica en `127.0.0.1` y rechaza cabeceras `Host` ajenas (DNS rebinding);
+- en modo local solo se publica en `127.0.0.1`, rechaza cabeceras `Host` ajenas (DNS rebinding) y también exige credencial: un secreto generado en un archivo solo para tu usuario. Esto frena a otros usuarios del equipo, pero **no a programas que corran con tu mismo usuario**, que pueden leer ese archivo. En Windows, la protección depende de los permisos de la carpeta;
 - sin Docker, el servidor escucha en `127.0.0.1` por defecto; la imagen fija `ESCUCHA=0.0.0.0` porque dentro del contenedor quien limita es el `ports` del compose;
 - el puerto de hooks (7778) nunca se publica fuera de `127.0.0.1`, y `/api/hook` solo existe en ese puerto, no en el del panel;
 - exige un token en los hooks;

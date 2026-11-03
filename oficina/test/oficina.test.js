@@ -613,3 +613,66 @@ test('la demo no lleva nombres reales ni IPs privadas', () => {
   assert.match(demo, /192\.0\.2\.1/);
   assert.match(demo, /\/home\/usuario\/proyectos\/api/);
 });
+
+test('una orden cuya respuesta no salió vuelve a la cola y se entrega de nuevo', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  o.nuevaOrden('s1', 'usa pnpm');
+  assert.ok(await ev(o, 'PostToolUse', { tool_name: 'Read' }));
+  const orden = o.sesiones.get('s1').ordenes[0];
+  assert.equal(orden.estado, 'entregada');
+  assert.equal(o.devolverLote('s1'), true);
+  assert.equal(orden.estado, 'pendiente');
+  assert.equal(orden.via, undefined);
+  assert.equal(o.devolverLote('s1'), false);
+  const r = await ev(o, 'PostToolUse', { tool_name: 'Read' });
+  assert.match(r.hookSpecificOutput.additionalContext, /usa pnpm/);
+  assert.equal(o.devolverLote('no-existe'), false);
+});
+
+test('devolver un lote de Stop no gasta una continuación', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  o.nuevaOrden('s1', 'sigue');
+  assert.equal((await ev(o, 'Stop', {})).decision, 'block');
+  assert.equal(o.sesiones.get('s1').continuaciones, 1);
+  o.devolverLote('s1');
+  assert.equal(o.sesiones.get('s1').continuaciones, 0);
+});
+
+test('las órdenes pendientes nunca se descartan: al llegar a 30 se rechaza la nueva', () => {
+  const o = new Oficina();
+  o.sesion('s1', base.cwd);
+  for (let i = 0; i < 30; i++) assert.ok(o.nuevaOrden('s1', 'p' + i).orden);
+  assert.match(o.nuevaOrden('s1', 'de más').error, /30/);
+  assert.equal(o.sesiones.get('s1').ordenes[0].texto, 'p0');
+  assert.ok(o.cancelarOrden('s1', o.sesiones.get('s1').ordenes[0].id));
+  assert.ok(o.nuevaOrden('s1', 'nueva').orden);
+  const s = o.sesiones.get('s1');
+  assert.equal(s.ordenes.length, 30);
+  assert.equal(s.ordenes[0].texto, 'p1', 'se olvida la cancelada');
+  assert.equal(s.ordenes[29].texto, 'nueva');
+});
+
+test('esperando pasa a sin_senal solo tras más de 2 h, y vuelve con un evento', async () => {
+  let t = 1000000;
+  const o = new Oficina({ ahora: () => t });
+  await ev(o, 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } });
+  const s = o.sesiones.get('s1');
+  t += 2 * 3600 * 1000 - 1000;
+  o.limpiar();
+  assert.equal(s.estado, 'esperando');
+  t += 2000;
+  o.limpiar();
+  assert.equal(s.estado, 'sin_senal');
+  await ev(o, 'PostToolUse', { tool_name: 'Bash' });
+  assert.equal(s.estado, 'pensando');
+});
+
+test('el texto de la orden dice que viene de una sesión iniciada', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  o.nuevaOrden('s1', 'algo');
+  const r = await ev(o, 'PostToolUse', { tool_name: 'Read' });
+  assert.match(r.hookSpecificOutput.additionalContext, /con sesión iniciada/);
+});

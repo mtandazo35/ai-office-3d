@@ -5,7 +5,7 @@
 #   docker compose run --rm instalar      # instala los hooks en ~/.claude/settings.json (una vez)
 #   AI_OFFICE_DEMO=1 docker compose up    # prueba sin Claude Code, con agentes simulados
 #
-# Local (por defecto): http://127.0.0.1:7777, sin contraseña.
+# Local (por defecto): enlace de un solo uso en el log: docker compose logs oficina | grep entrar
 # VPS: en .env pon PUBLICAR_IP=0.0.0.0 y OFICINA_PASSWORD; se abre en https://IP_DEL_VPS:7777.
 # Ver .env.example.
 
@@ -44,6 +44,8 @@ services:
       CONFIAR_PROXY: "${CONFIAR_PROXY:-0}"
       GUARDIA_MAX_MIN: "${GUARDIA_MAX_MIN:-14}"
       AI_OFFICE_DEMO: "${AI_OFFICE_DEMO:-0}"
+      # Puerto del enlace de un solo uso que sale en el log.
+      PUERTO_PUBLICO: "${PUERTO:-7777}"
     volumes:
       # Solo lectura y solo lo necesario: transcripts (tokens y sesiones recientes) y el token de los hooks.
       # El resto de ~/.claude (credenciales de Claude, settings.json) no entra en este contenedor.

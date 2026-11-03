@@ -98,3 +98,27 @@ test('desinstalar también recorta las copias', () => {
     assert.equal(fs.readdirSync(dir).filter((n) => n.startsWith('settings.json.bak-ai-office-')).length, 5);
   });
 });
+
+test('settings.json y sus copias quedan solo para el dueño, y avisa si tenían permisos laxos', { skip: process.platform === 'win32' ? 'los modos POSIX no aplican en Windows' : false }, () => {
+  conCarpeta((dir) => {
+    escribirAjustes(dir, { model: 'x' });
+    fs.chmodSync(path.join(dir, 'settings.json'), 0o644);
+    fs.writeFileSync(path.join(dir, copiaDe(1)), '{}', { mode: 0o644 });
+    const r = instalar(dir);
+    assert.match(r.stdout, /permisos 644/);
+    assert.equal(fs.statSync(path.join(dir, 'settings.json')).mode & 0o777, 0o600);
+    for (const f of fs.readdirSync(dir).filter((n) => n.startsWith('settings.json.bak-ai-office-'))) {
+      assert.equal(fs.statSync(path.join(dir, f)).mode & 0o777, 0o600, f);
+    }
+  });
+});
+
+test('los hooks siguen instalados en settings.json y el contenido no se pierde al ajustar permisos', () => {
+  conCarpeta((dir) => {
+    escribirAjustes(dir, { model: 'x' });
+    instalar(dir);
+    const a = leerAjustes(dir);
+    assert.equal(a.model, 'x');
+    assert.ok(a.hooks.Stop);
+  });
+});

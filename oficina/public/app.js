@@ -187,6 +187,7 @@ function pintarDetalle() {
   $('btn-orden').textContent = enviando ? 'Enviando…' : 'Enviar orden';
   const sinAprobacion = MODOS_SIN_APROBACION.has(s.modoPermisos);
   $('d-aviso-permisos').hidden = !sinAprobacion;
+  $('d-aviso-ediciones').hidden = s.modoPermisos !== 'acceptEdits';
   if (sinAprobacion) $('d-aviso-modo').textContent = s.modoPermisos;
   const firma = s.id + '|' + s.guardia;
   if (firma !== firmaFormulario) { $('guardia').checked = s.guardia; firmaFormulario = firma; }

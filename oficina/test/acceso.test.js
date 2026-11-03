@@ -179,3 +179,33 @@ test('servidor.js usa esas direcciones y el Dockerfile fija ESCUCHA', () => {
   assert.match(servidor, /ganchos\.listen\(PUERTO_HOOKS, ESCUCHA_HOOKS,/);
   assert.match(leer('Dockerfile'), /^ENV ESCUCHA=0\.0\.0\.0$/m);
 });
+
+test('el secreto local se crea una vez, se reutiliza y no se pierde', () => {
+  const { obtenerSecreto } = require('../src/acceso');
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-secreto-'));
+  try {
+    const archivo = path.join(dir, 'sub', 'panel-secreto');
+    const a = obtenerSecreto(archivo);
+    assert.ok(a.length >= 32);
+    assert.equal(obtenerSecreto(archivo), a);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(archivo).mode & 0o777, 0o600);
+    fs.writeFileSync(archivo, 'corto');
+    assert.notEqual(obtenerSecreto(archivo), 'corto');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('un enlace de un solo uso caduca y no se reutiliza', () => {
+  let t = 1000;
+  const a = new Acceso({ password: 'una-clave-larga-123', ahora: () => t });
+  const uno = a.crearEnlace();
+  const sesion = a.canjearEnlace(uno);
+  assert.ok(sesion);
+  assert.equal(a.autorizada(req('oficina_sesion=' + sesion)), true);
+  assert.equal(a.canjearEnlace(uno), null);
+  assert.equal(a.canjearEnlace('inventado'), null);
+  assert.equal(a.canjearEnlace(undefined), null);
+  const dos = a.crearEnlace();
+  t += 16 * 60 * 1000;
+  assert.equal(a.canjearEnlace(dos), null);
+});
