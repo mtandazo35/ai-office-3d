@@ -51,7 +51,7 @@ if (REMOTO && PASSWORD.length < 12) {
   process.exit(1);
 }
 
-const oficina = new Oficina({ guardiaMaxMs: GUARDIA_MAX_MIN * 60 * 1000, archivoNombres: path.join(DATOS, 'nombres.json') });
+const oficina = new Oficina({ guardiaMaxMs: GUARDIA_MAX_MIN * 60 * 1000, archivoPerfiles: path.join(DATOS, 'perfiles.json') });
 const transcripts = new Transcripts(oficina, { raiz: RAIZ_CLAUDE });
 const acceso = new Acceso({ password: PASSWORD, confiarProxy: env.CONFIAR_PROXY === '1' });
 
@@ -228,7 +228,7 @@ function enviarTodos(msg) {
 }
 
 wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ t: 'snapshot', sesiones: oficina.instantanea(), config: configPublica() }));
+  ws.send(JSON.stringify({ t: 'snapshot', sesiones: oficina.instantanea(), perfiles: oficina.listaPerfiles(), config: configPublica() }));
   let cuenta = 0, ventana = Date.now();
   ws.on('message', (raw) => {
     if (Date.now() - ventana > 10000) { ventana = Date.now(); cuenta = 0; }
@@ -241,6 +241,8 @@ wss.on('connection', (ws) => {
     else if (m.t === 'cancelar') r = { ok: oficina.cancelarOrden(m.id, String(m.ordenId || '')) };
     else if (m.t === 'guardia') r = { ok: oficina.ponerGuardia(m.id, !!m.activa) };
     else if (m.t === 'nombre') r = oficina.renombrar(m.id, m.nombre);
+    else if (m.t === 'perfil') r = oficina.actualizarPerfil(m.id, { nombre: m.nombre, rol: m.rol, genero: m.genero });
+    else if (m.t === 'olvidar') r = oficina.olvidarPerfil(m.id);
     else return;
     ws.send(JSON.stringify({ t: 'respuesta', ref: m.ref, ...r }));
   });
@@ -248,6 +250,23 @@ wss.on('connection', (ws) => {
 
 oficina.on('sesion', (s) => enviarTodos({ t: 'sesion', s }));
 oficina.on('quitar', (id) => enviarTodos({ t: 'quitar', id }));
+
+// La página de gestión recibe la lista solo cuando cambia, como mucho dos veces por segundo.
+let listaEnviada = '', temporizadorLista = null;
+function avisarPerfiles() {
+  if (temporizadorLista) return;
+  temporizadorLista = setTimeout(() => {
+    temporizadorLista = null;
+    const perfiles = oficina.listaPerfiles(), texto = JSON.stringify(perfiles);
+    if (texto === listaEnviada) return;
+    listaEnviada = texto;
+    enviarTodos({ t: 'perfiles', perfiles });
+  }, 500);
+  temporizadorLista.unref();
+}
+oficina.on('sesion', avisarPerfiles);
+oficina.on('quitar', avisarPerfiles);
+oficina.on('perfiles', avisarPerfiles);
 
 // ---------- Arranque ----------
 const servidores = [];

@@ -3,14 +3,8 @@
 // celebran al terminar un turno y se van cuando la sesión se cierra.
 import * as THREE from '/vendor/three/three.module.js';
 
-export const COLORES = {
-  inactivo: '#8d99ae', pensando: '#4ea1ff', ejecutando: '#2ee59d', esperando: '#ffb545',
-  guardia: '#c9a6ff', error: '#ff4d6d', terminada: '#4a5268'
-};
-export const NOMBRES = {
-  inactivo: 'Inactivo', pensando: 'Pensando', ejecutando: 'Trabajando', esperando: 'Espera tu aprobación',
-  guardia: 'En guardia: espera órdenes', error: 'Error', terminada: 'Sesión terminada'
-};
+import { COLORES, NOMBRES } from '/estados.js';
+export { COLORES, NOMBRES };
 export function nivelDe(herramientas) {
   const x = (herramientas || 0) / 4;
   const nivel = Math.floor(Math.sqrt(x)) + 1;
@@ -279,13 +273,27 @@ export function crearEscena(canvas, { alSeleccionar }) {
 
     g.scale.setScalar(0.01);
     scene.add(g);
-    e.p = nuevoPersonaje(h);
+    e.p = nuevoPersonaje(h, s.genero);
+    e.genero = s.genero || '';
     scene.add(e.p.raiz);
     escritorios.set(s.id, e);
     return e;
   }
 
-  function nuevoPersonaje(h) {
+  // El género cambia el peinado; el resto del aspecto sigue saliendo del id de la sesión.
+  function cambiarPersonaje(e, genero) {
+    const v = e.p, n = nuevoPersonaje(e.h, genero);
+    Object.assign(n, { modo: v.modo, ruta: v.ruta, saludo: v.saludo, sacudida: v.sacudida, mano: v.mano });
+    n.raiz.position.copy(v.raiz.position);
+    n.raiz.rotation.copy(v.raiz.rotation);
+    n.raiz.visible = v.raiz.visible;
+    scene.remove(v.raiz); liberar(v.raiz);
+    scene.add(n.raiz);
+    e.p = n;
+    e.genero = genero || '';
+  }
+
+  function nuevoPersonaje(h, genero) {
     const raiz = new THREE.Group();
     const camisa = toon(elegir(CAMISAS, h)), piel = toon(elegir(PIELES, h, 4)), pelo = toon(elegir(PELOS, h, 9));
     const pantalon = toon(elegir(['#2b2d42', '#3d5a80', '#5c4033', '#495057'], h, 13));
@@ -307,9 +315,10 @@ export function crearEscena(canvas, { alSeleccionar }) {
     });
     p.cabeza = new THREE.Group(); p.cabeza.position.y = 1.62; raiz.add(p.cabeza);
     const craneo = malla(new THREE.SphereGeometry(0.36, 20, 16), piel); p.cabeza.add(craneo);
-    const melena = malla(new THREE.SphereGeometry(0.385, 20, 16, 0, Math.PI * 2, 0, Math.PI * (0.42 + (h % 5) * 0.03)), pelo);
+    const melena = malla(new THREE.SphereGeometry(0.385, 20, 16, 0, Math.PI * 2, 0, Math.PI * (genero === 'masculino' ? 0.4 : 0.42 + (h % 5) * 0.03)), pelo);
     melena.rotation.x = -0.35; melena.position.set(0, 0.03, -0.03); p.cabeza.add(melena);
-    if (h % 4 === 0) { const mono = malla(new THREE.SphereGeometry(0.14, 12, 10), pelo); mono.position.set(0, 0.32, -0.25); p.cabeza.add(mono); }
+    if (genero === 'femenino') { const largo = malla(new THREE.CapsuleGeometry(0.27, 0.42, 6, 14), pelo); largo.position.set(0, -0.3, -0.2); p.cabeza.add(largo); }
+    if (genero !== 'masculino' && h % 4 === 0) { const mono = malla(new THREE.SphereGeometry(0.14, 12, 10), pelo); mono.position.set(0, 0.32, -0.25); p.cabeza.add(mono); }
     const negro = toon('#1b1b1b');
     p.ojos = [-0.13, 0.13].map((x) => { const o = malla(new THREE.SphereGeometry(0.055, 10, 8), negro, false); o.position.set(x, 0.02, 0.32); p.cabeza.add(o); return o; });
     const brillo = new THREE.MeshBasicMaterial({ color: '#ffffff' });
@@ -395,12 +404,13 @@ export function crearEscena(canvas, { alSeleccionar }) {
   function actualizarEscritorio(e, s) {
     const anterior = e.previo;
     e.s = s;
+    if ((s.genero || '') !== e.genero) cambiarPersonaje(e, s.genero);
     pintarPantalla(e, s);
     const color = COLORES[s.estado] || COLORES.inactivo;
     e.anillo.material.color.set(color);
     e.led.material.color.set(color);
     const { nivel } = nivelDe(s.herramientasUsadas);
-    const textoEtq = 'Nv ' + nivel + '  ' + s.nombre + ' · ' + s.proyecto;
+    const textoEtq = 'Nv ' + nivel + '  ' + s.nombre + ' · ' + (s.rol || s.proyecto);
     if (textoEtq + s.estado !== e.firmaEtiqueta) {
       e.firmaEtiqueta = textoEtq + s.estado;
       repintarEtiqueta(e.etiqueta, textoEtq, { tam: 34, fijo: true, px: 26, color: '#ffffff', fondoColor: color === COLORES.inactivo ? 'rgba(43,45,66,0.92)' : color, colorTexto: color === COLORES.inactivo ? '#ffffff' : '#10131c' });

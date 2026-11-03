@@ -19,6 +19,7 @@
     <div id="resumen" class="resumen" aria-live="polite"></div>
     <div class="acciones-barra">
       <span id="conexion" class="conexion" data-estado="conectando"><i></i><span>Conectando…</span></span>
+      <a class="btn sec" href="/agentes.html">Gestionar agentes</a>
       <button id="btn-ayuda" class="btn sec" type="button">Conectar Claude Code</button>
       <button id="btn-salir" class="btn sec" type="button" hidden>Salir</button>
     </div>
@@ -125,7 +126,7 @@
       <pre>docker compose run --rm instalar</pre>
       Añade a <code>~/.claude/settings.json</code> hooks de tipo <code>http</code> que envían cada evento a esta oficina, con un token propio. Guarda antes una copia del archivo.</li>
     <li><b>Reinicia las sesiones</b> de Claude Code (terminal o VS Code) para que carguen los hooks. Comprueba con <code>/hooks</code>.</li>
-    <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio, con un nombre propio que puedes cambiar con «Renombrar». Pulsa sobre él para ver qué hace y darle órdenes.</li>
+    <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio, con un nombre propio. En «Gestionar agentes» puedes cambiar el nombre, el rol y el género de cada uno. Pulsa sobre él para ver qué hace y darle órdenes.</li>
   </ol>
   <p class="nota">Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el sistema de permisos normal de Claude Code: no le dan permisos nuevos.</p>
 </dialog>

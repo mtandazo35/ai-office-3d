@@ -11,8 +11,12 @@ const ESTADOS = ['inactivo', 'pensando', 'ejecutando', 'esperando', 'guardia', '
 const MAX_LOG = 60;
 const MAX_ORDENES = 30;
 const MAX_NOMBRE = 24;
-const MAX_NOMBRES_GUARDADOS = 200;
+const MAX_ROL = 30;
+const MAX_PERFILES_GUARDADOS = 200;
+const GENEROS = ['', 'femenino', 'masculino', 'no_binario'];
 const NOMBRES_AGENTES = ['Nico', 'Lía', 'Teo', 'Vera', 'Bruno', 'Sara', 'Iker', 'Noa', 'Hugo', 'Alma', 'Dante', 'Luna', 'Marco', 'Inés', 'Leo', 'Julia', 'Omar', 'Clara', 'Tomás', 'Elsa', 'Gael', 'Nora', 'Raúl', 'Mía'];
+
+const limpiarTexto = (t) => (typeof t === 'string' ? t.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '');
 
 function hashTexto(t) {
   let h = 0;
@@ -70,37 +74,38 @@ class Oficina extends EventEmitter {
     this.guardiaMaxMs = opts.guardiaMaxMs || 14 * 60 * 1000;
     this.ahora = opts.ahora || (() => Date.now());
     this.secuencia = 0;
-    this.archivoNombres = opts.archivoNombres || null;
-    this.nombresPropios = this.cargarNombres();
+    this.archivoPerfiles = opts.archivoPerfiles || null;
+    this.perfiles = this.cargarPerfiles();
   }
 
-  // ---------- Nombres ----------
-  // Los nombres elegidos por el usuario se guardan; los automáticos salen del id de la sesión.
-  cargarNombres() {
-    if (!this.archivoNombres) return new Map();
+  // ---------- Perfiles: nombre, rol y género ----------
+  // Solo se guarda lo que el usuario ha editado; el nombre automático sale del id de la sesión.
+  cargarPerfiles() {
+    if (!this.archivoPerfiles) return new Map();
     try {
-      const datos = JSON.parse(fs.readFileSync(this.archivoNombres, 'utf8'));
-      return new Map(Object.entries(datos).filter(([, n]) => typeof n === 'string'));
+      const datos = JSON.parse(fs.readFileSync(this.archivoPerfiles, 'utf8'));
+      return new Map(Object.entries(datos).filter(([, p]) => p && typeof p === 'object' && typeof p.nombre === 'string'));
     } catch { return new Map(); }
   }
 
-  guardarNombres() {
-    if (!this.archivoNombres) return;
-    const tmp = this.archivoNombres + '.tmp';
+  guardarPerfiles() {
+    if (!this.archivoPerfiles) return;
+    const tmp = this.archivoPerfiles + '.tmp';
     try {
-      fs.mkdirSync(path.dirname(this.archivoNombres), { recursive: true });
-      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.nombresPropios), null, 2));
-      fs.renameSync(tmp, this.archivoNombres);
-    } catch (e) { console.error('No pude guardar los nombres:', e.message); }
+      fs.mkdirSync(path.dirname(this.archivoPerfiles), { recursive: true });
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.perfiles), null, 2));
+      fs.renameSync(tmp, this.archivoPerfiles);
+    } catch (e) { console.error('No pude guardar los perfiles:', e.message); }
   }
 
   nombreEnUso(nombre, salvoId) {
     const buscado = nombre.toLocaleLowerCase('es');
     for (const s of this.sesiones.values()) if (s.id !== salvoId && s.nombre.toLocaleLowerCase('es') === buscado) return true;
+    for (const [id, p] of this.perfiles) if (id !== salvoId && p.nombre.toLocaleLowerCase('es') === buscado) return true;
     return false;
   }
 
-  // Siempre el mismo para una sesión, salvo que ya lo lleve otro agente activo.
+  // Siempre el mismo para una sesión, salvo que ya lo lleve otro agente.
   nombreAutomatico(id) {
     const n = NOMBRES_AGENTES.length, inicio = hashTexto(id) % n;
     for (let i = 0; i < n; i++) {
@@ -113,29 +118,70 @@ class Oficina extends EventEmitter {
     }
   }
 
-  renombrar(id, texto) {
-    const s = this.sesiones.get(id);
-    if (!s) return { error: 'La sesión ya no existe.' };
-    const nombre = typeof texto === 'string' ? texto.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
-    if (!nombre) return { error: 'El nombre está vacío.' };
-    if ([...nombre].length > MAX_NOMBRE) return { error: 'El nombre supera ' + MAX_NOMBRE + ' caracteres.' };
-    if (this.nombreEnUso(nombre, id)) return { error: 'Ya hay otro agente activo con ese nombre.' };
-    const anterior = s.nombre;
-    s.nombre = nombre;
-    this.nombresPropios.delete(id);
-    this.nombresPropios.set(id, nombre);
-    while (this.nombresPropios.size > MAX_NOMBRES_GUARDADOS) this.nombresPropios.delete(this.nombresPropios.keys().next().value);
-    this.guardarNombres();
-    if (anterior !== nombre) this.registrar(s, 'sesion', 'Ahora se llama ' + nombre + ' (antes ' + anterior + ')');
-    this.cambio(s);
+  // Cambia los campos que vengan definidos. Sirve también para agentes guardados sin sesión activa.
+  actualizarPerfil(id, cambios = {}) {
+    const s = this.sesiones.get(id), previo = this.perfiles.get(id);
+    if (!s && !previo) return { error: 'La sesión ya no existe.' };
+    const base = s || previo;
+    const nuevo = { nombre: base.nombre, rol: base.rol || '', genero: base.genero || '' };
+    if (cambios.nombre !== undefined) {
+      const nombre = limpiarTexto(cambios.nombre);
+      if (!nombre) return { error: 'El nombre está vacío.' };
+      if ([...nombre].length > MAX_NOMBRE) return { error: 'El nombre supera ' + MAX_NOMBRE + ' caracteres.' };
+      if (this.nombreEnUso(nombre, id)) return { error: 'Ya hay otro agente con ese nombre.' };
+      nuevo.nombre = nombre;
+    }
+    if (cambios.rol !== undefined) {
+      const rol = limpiarTexto(cambios.rol);
+      if ([...rol].length > MAX_ROL) return { error: 'El rol supera ' + MAX_ROL + ' caracteres.' };
+      nuevo.rol = rol;
+    }
+    if (cambios.genero !== undefined) {
+      if (!GENEROS.includes(cambios.genero)) return { error: 'Género no válido.' };
+      nuevo.genero = cambios.genero;
+    }
+    this.perfiles.delete(id);
+    this.perfiles.set(id, { ...nuevo, proyecto: base.proyecto || '', actualizado: this.ahora() });
+    while (this.perfiles.size > MAX_PERFILES_GUARDADOS) this.perfiles.delete(this.perfiles.keys().next().value);
+    this.guardarPerfiles();
+    if (s) {
+      if (s.nombre !== nuevo.nombre) this.registrar(s, 'sesion', 'Ahora se llama ' + nuevo.nombre + ' (antes ' + s.nombre + ')');
+      if (s.rol !== nuevo.rol) this.registrar(s, 'sesion', nuevo.rol ? 'Rol: ' + nuevo.rol : 'Sin rol');
+      Object.assign(s, nuevo);
+      this.cambio(s);
+    }
+    this.emit('perfiles');
     return { ok: true };
+  }
+
+  renombrar(id, texto) {
+    return this.actualizarPerfil(id, { nombre: typeof texto === 'string' ? texto : '' });
+  }
+
+  olvidarPerfil(id) {
+    if (this.sesiones.has(id)) return { error: 'Este agente sigue activo; no se puede olvidar todavía.' };
+    if (!this.perfiles.delete(id)) return { error: 'Ese agente ya no está guardado.' };
+    this.guardarPerfiles();
+    this.emit('perfiles');
+    return { ok: true };
+  }
+
+  listaPerfiles() {
+    const activos = [...this.sesiones.values()].map((s) => ({
+      id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, proyecto: s.proyecto, estado: s.estado, activo: true
+    }));
+    const guardados = [...this.perfiles].filter(([id]) => !this.sesiones.has(id)).map(([id, p]) => ({
+      id, nombre: p.nombre, rol: p.rol || '', genero: p.genero || '', proyecto: p.proyecto || '', estado: '', activo: false, actualizado: p.actualizado
+    }));
+    return [...activos, ...guardados];
   }
 
   sesion(id, cwd) {
     let s = this.sesiones.get(id);
     if (!s) {
+      const perfil = this.perfiles.get(id) || {};
       s = {
-        id, nombre: this.nombresPropios.get(id) || this.nombreAutomatico(id), cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
+        id, nombre: perfil.nombre || this.nombreAutomatico(id), rol: perfil.rol || '', genero: perfil.genero || '', cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
         estado: 'inactivo', herramienta: '', detalle: '', ultimoPrompt: '', ultimoMensaje: '',
         permiso: '', inicio: this.ahora(), ultimaActividad: this.ahora(),
         tokens: { contexto: 0, salida: 0 }, subagentes: {}, ordenes: [], guardia: false, log: [],
@@ -159,7 +205,7 @@ class Oficina extends EventEmitter {
   // Copia segura para el navegador (sin timers ni promesas).
   vista(s) {
     return {
-      id: s.id, nombre: s.nombre, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
+      id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
       estado: s.estado, herramienta: s.herramienta, detalle: s.detalle,
       ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso,
       inicio: s.inicio, ultimaActividad: s.ultimaActividad, tokens: { ...s.tokens },
@@ -425,4 +471,4 @@ class Oficina extends EventEmitter {
   }
 }
 
-module.exports = { Oficina, detalleHerramienta, proyectoDe, ESTADOS, NOMBRES_AGENTES, MAX_NOMBRE };
+module.exports = { Oficina, detalleHerramienta, proyectoDe, ESTADOS, NOMBRES_AGENTES, GENEROS, MAX_NOMBRE, MAX_ROL };

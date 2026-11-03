@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Gestión de agentes · Oficina IA</title>
+<link rel="icon" href="/icono.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/estilos.css">
+<script type="module" src="/agentes.js"></script>
+</head>
+<body class="pagina-agentes">
+<main class="gestion">
+  <header class="gestion-cab">
+    <div class="marca">
+      <span class="logo" aria-hidden="true"></span>
+      <h1>Gestión de agentes</h1>
+    </div>
+    <div class="acciones-barra">
+      <span id="conexion" class="conexion" data-estado="conectando"><i></i><span>Conectando…</span></span>
+      <a class="btn sec" href="/">Volver a la oficina</a>
+    </div>
+  </header>
+
+  <p class="gestion-nota">El rol es una etiqueta para ti: no cambia lo que hace Claude. El género cambia el peinado del personaje. Cada perfil pertenece a una sesión: si la reanudas lo recupera, y una sesión nueva empieza con uno nuevo.</p>
+  <p id="resumen" class="gestion-resumen" aria-live="polite"></p>
+
+  <label for="filtro" class="oculto">Buscar agente</label>
+  <input id="filtro" class="gestion-filtro" type="search" placeholder="Buscar por nombre, rol o proyecto" autocomplete="off">
+
+  <datalist id="roles">
+    <option value="Coordinador"></option>
+    <option value="Programador"></option>
+    <option value="Revisor"></option>
+    <option value="Arquitecto"></option>
+    <option value="QA"></option>
+    <option value="DevOps"></option>
+    <option value="Seguridad"></option>
+    <option value="Documentación"></option>
+  </datalist>
+
+  <ul id="agentes" class="agentes"></ul>
+  <p id="vacio" class="agentes-vacio" hidden></p>
+</main>
+
+<dialog id="aviso">
+  <p id="aviso-texto"></p>
+  <div class="modal-acciones"><button id="aviso-cerrar" class="btn" type="button">Entendido</button></div>
+</dialog>
+
+<dialog id="confirmar">
+  <p id="confirmar-texto"></p>
+  <div class="modal-acciones">
+    <button id="confirmar-no" class="btn sec" type="button">Cancelar</button>
+    <button id="confirmar-si" class="btn" type="button">Olvidar</button>
+  </div>
+</dialog>
+</body>
+</html>

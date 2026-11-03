@@ -1,6 +1,7 @@
 // Panel de la oficina: conexión WebSocket, lista de agentes, detalle y órdenes.
 // Todo el texto que viene de las sesiones se pinta con textContent (nunca innerHTML).
 import { crearEscena, COLORES, NOMBRES, nivelDe } from '/escena.js';
+import { GENEROS } from '/estados.js';
 
 const $ = (id) => document.getElementById(id);
 const sesiones = new Map();
@@ -112,7 +113,7 @@ function pintarLista() {
     f.boton.style.setProperty('--c', COLORES[s.estado] || COLORES.inactivo);
     f.boton.setAttribute('aria-current', String(s.id === seleccion));
     poner(f.nv, 'Nv ' + nivelDe(s.herramientasUsadas).nivel);
-    poner(f.proy, s.nombre + ' · ' + s.proyecto + (pend ? '  ✉' + pend : ''));
+    poner(f.proy, s.nombre + (s.rol ? ' (' + s.rol + ')' : '') + ' · ' + s.proyecto + (pend ? '  ✉' + pend : ''));
     poner(f.est, NOMBRES[s.estado] || s.estado);
     poner(f.que, queHace(s));
     // Orden estable: solo se mueve si no está ya en su sitio.
@@ -136,6 +137,8 @@ function pintarDetalle() {
   $('d-cwd').textContent = s.cwd;
 
   const chips = $('d-chips'); chips.replaceChildren(el('span', { class: 'chip estado', c: color }, NOMBRES[s.estado] || s.estado));
+  if (s.rol) chips.append(el('span', { class: 'chip' }, s.rol));
+  if (s.genero) chips.append(el('span', { class: 'chip' }, GENEROS[s.genero] || s.genero));
   if (s.modelo) chips.append(el('span', { class: 'chip' }, s.modelo));
   if (s.origen === 'transcript') chips.append(el('span', { class: 'chip', title: 'Detectada leyendo su transcript; aún no ha mandado eventos de hooks' }, 'sin hooks'));
   chips.append(el('span', { class: 'chip', title: s.id }, s.id.slice(0, 8)));

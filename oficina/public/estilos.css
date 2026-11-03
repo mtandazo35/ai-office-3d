@@ -46,6 +46,7 @@ code, pre, .mono { font-family: var(--mono); }
   background: var(--lila); color: #140b2a; border: 0; border-radius: 7px; padding: 9px 14px;
   font-weight: 700; font-size: 14px; cursor: pointer; white-space: nowrap;
 }
+a.btn { display: inline-block; text-decoration: none; }
 .btn.sec { background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); font-weight: 600; }
 .btn.mini { padding: 4px 9px; font-size: 13px; }
 .btn:disabled { opacity: .5; cursor: default; }
@@ -185,3 +186,32 @@ code { font-size: .92em; background: var(--panel-2); padding: 1px 5px; border-ra
 .xp-datos { font: 12px var(--mono); color: var(--muted); }
 .lista .l-nv { font: 800 11px var(--mono); color: #1b1b1b; background: #ffd166; border-radius: 5px; padding: 1px 5px; margin-right: 7px; vertical-align: 1px; }
 @media (prefers-reduced-motion: reduce) { .xp-barra i { transition: none; } }
+
+/* ---------- Gestión de agentes ---------- */
+html:has(body.pagina-agentes), body.pagina-agentes { height: auto; min-height: 100%; }
+body.pagina-agentes { overflow: auto; }
+.gestion { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+.gestion-cab { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.gestion-cab .marca { display: flex; align-items: center; gap: 10px; }
+.gestion-cab h1 { font-size: 21px; }
+.gestion-nota { margin: 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+.gestion-resumen { margin: 0; font-size: 14px; }
+.gestion-filtro { width: 100%; padding: 9px 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }
+.agentes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.agente { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .9fr) auto; align-items: end; }
+.agente-info { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 13px; color: var(--muted); }
+.agente-estado { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); }
+.agente-estado i { width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--tenue)); }
+.agente-id { font-family: var(--mono); font-size: 12px; }
+.campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; color: var(--muted); }
+.campo input, .campo select { width: 100%; padding: 8px 10px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 14px; }
+.agente-acciones { display: flex; align-items: center; gap: 8px; }
+.agente-guardado { font-size: 13px; color: var(--ok); }
+.agentes-vacio { color: var(--muted); padding: 24px; text-align: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.modal-acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+#aviso, #confirmar { width: min(420px, calc(100% - 24px)); }
+@media (max-width: 800px) {
+  .agente { grid-template-columns: 1fr 1fr; }
+  .agente-acciones { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 480px) { .agente { grid-template-columns: 1fr; } }

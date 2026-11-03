@@ -172,10 +172,42 @@ test('renombrar valida el nombre y no admite duplicados', () => {
 test('el nombre elegido sobrevive a un reinicio', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
   try {
-    const archivoNombres = path.join(dir, 'sub', 'nombres.json');
-    const o = new Oficina({ archivoNombres });
+    const archivoPerfiles = path.join(dir, 'sub', 'perfiles.json');
+    const o = new Oficina({ archivoPerfiles });
     o.sesion('a');
     assert.ok(o.renombrar('a', 'Capitana').ok);
-    assert.equal(new Oficina({ archivoNombres }).sesion('a').nombre, 'Capitana');
+    assert.equal(new Oficina({ archivoPerfiles }).sesion('a').nombre, 'Capitana');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('el rol y el género se validan, se guardan y vuelven al reabrir la sesión', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const archivoPerfiles = path.join(dir, 'perfiles.json');
+    const o = new Oficina({ archivoPerfiles });
+    o.sesion('a', '/x/api');
+    assert.ok(o.actualizarPerfil('a', { rol: 'x'.repeat(31) }).error);
+    assert.ok(o.actualizarPerfil('a', { genero: 'otro' }).error);
+    assert.ok(o.actualizarPerfil('a', { nombre: 'Vera', rol: ' Revisora ', genero: 'femenino' }).ok);
+    const s = new Oficina({ archivoPerfiles }).sesion('a');
+    assert.deepEqual([s.nombre, s.rol, s.genero], ['Vera', 'Revisora', 'femenino']);
+    assert.ok(o.actualizarPerfil('a', { rol: '', genero: '' }).ok);
+    assert.deepEqual([o.sesiones.get('a').nombre, o.sesiones.get('a').rol, o.sesiones.get('a').genero], ['Vera', '', '']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('la lista incluye agentes guardados sin sesión, editables y olvidables', () => {
+  const o = new Oficina();
+  o.sesion('a', '/x/api');
+  o.actualizarPerfil('a', { nombre: 'Vera', rol: 'QA' });
+  assert.ok(o.olvidarPerfil('a').error, 'no se olvida un agente activo');
+  o.sesiones.delete('a');
+  assert.deepEqual(o.listaPerfiles().map((p) => [p.id, p.activo, p.proyecto, p.rol]), [['a', false, 'api', 'QA']]);
+  assert.ok(o.actualizarPerfil('a', { rol: 'DevOps' }).ok);
+  assert.equal(o.listaPerfiles()[0].rol, 'DevOps');
+  o.sesion('b');
+  assert.ok(o.renombrar('b', 'vera').error, 'el nombre de un agente guardado sigue reservado');
+  assert.ok(o.olvidarPerfil('a').ok);
+  assert.ok(o.olvidarPerfil('a').error);
+  assert.ok(o.actualizarPerfil('a', { rol: 'x' }).error);
 });
