@@ -24,7 +24,7 @@ instalar_paquetes() {
   command -v apt-get >/dev/null || falla "este instalador solo admite Debian y Ubuntu (apt)."
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq </dev/null
-  local paquetes=(git ca-certificates curl)
+  local paquetes=(git ca-certificates curl tmux python3)
   if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
     paquetes+=(docker.io)
     # Debian 13 separa el cliente de docker; compose cambia de nombre según la distribución.
@@ -119,6 +119,41 @@ url_panel() {
   echo "$esquema://$ip:${puerto:-7777}"
 }
 
+# Servicio del host que abre Claude en tmux; el botón «Conectar» del panel le habla por un socket local.
+# KillMode=process: reiniciar el servicio no debe cerrar los agentes abiertos.
+instalar_conector() {
+  local usuario=$1 dir=$2 casa
+  casa=$(getent passwd "$usuario" | cut -d: -f6)
+  [ "${OFICINA_SIN_CLAUDE:-0}" = 1 ] && return 0
+  [ -x /usr/local/bin/claude ] || { echo "AVISO: sin Claude Code no instalo el conector."; return 0; }
+  install -d -m 755 /usr/local/lib/oficina
+  install -m 644 "$dir/oficina/scripts/conector.py" /usr/local/lib/oficina/conector.py
+  cat > /etc/systemd/system/oficina-conector.service <<UNIDAD
+[Unit]
+Description=Conector de la Oficina IA
+After=network-online.target
+
+[Service]
+User=$usuario
+WorkingDirectory=$casa
+Environment=HOME=$casa
+Environment=LANG=C.UTF-8
+Environment=PATH=$casa/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /usr/local/lib/oficina/conector.py
+KillMode=process
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIDAD
+  systemctl daemon-reload
+  systemctl enable oficina-conector >/dev/null 2>&1 || true
+  systemctl restart oficina-conector
+  sleep 1
+  systemctl is-active --quiet oficina-conector && echo "Conector activo." || echo "AVISO: el conector no arrancó: journalctl -u oficina-conector"
+}
+
 esperar_servicio() {
   local i estado=''
   for i in $(seq 1 24); do
@@ -167,6 +202,7 @@ main() {
 
   paso "Instalo Claude Code para $usuario"
   instalar_claude "$usuario"
+  instalar_conector "$usuario" "$dir"
 
   paso "Compruebo el servicio"
   esperar_servicio
@@ -205,9 +241,8 @@ FIN
   esac
   cat <<FIN
 
-Para conectar un agente, pulsa «Conectar Claude Code» en el panel, o pega esto en una terminal de tu PC:
-     ssh -t $usuario@${ip:-IP_DEL_SERVIDOR} claude
-La primera vez, Claude te pedirá iniciar sesión con tu cuenta.
+Para conectar un agente, pulsa «Conectar Claude Code» en el panel. La primera vez te dará un enlace
+para autorizar con tu cuenta y una caja donde pegar el código; después basta con el botón.
 
 Para quitar los hooks: cd $dir && docker compose run --rm instalar --desinstalar
 FIN

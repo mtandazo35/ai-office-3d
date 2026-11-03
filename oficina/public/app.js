@@ -184,7 +184,8 @@ function pintarDetalle() {
   // Órdenes
   const terminada = s.estado === 'terminada';
   const enviando = ordenEnviandose(s.id);
-  const sinConexion = terminada || s.origen === 'transcript';
+  const sinConexion = terminada || (s.origen === 'transcript' && !s.enTerminal);
+  $('btn-terminar').hidden = !s.enTerminal || terminada;
   $('orden').disabled = sinConexion; $('btn-orden').disabled = sinConexion || enviando;
   $('orden').dataset.ejemplo ||= $('orden').placeholder;
   $('orden').placeholder = terminada ? 'La sesión terminó: ya no recibe órdenes.'
@@ -294,12 +295,75 @@ $('con-copiar').addEventListener('click', async () => {
   const ok = await copiarTexto($('con-comando').textContent);
   $('con-copiar').textContent = ok ? 'Copiado' : 'Selecciónalo y cópialo';
 });
-$('btn-ayuda').addEventListener('click', abrirAyuda);
+// «Conectar»: con conector, el panel abre Claude en el servidor y pide el código aquí mismo.
+let conexionRef = '', agenteEnLogin = '', porSeleccionar = '';
+function pedirConexion(msg) {
+  conexionRef = 'c' + Date.now();
+  return enviar({ ...msg, ref: conexionRef });
+}
+function verConexion(zona) {
+  $('con-cargando').hidden = zona !== 'cargando';
+  $('con-login').hidden = zona !== 'login';
+  $('con-error').hidden = zona !== 'error';
+}
+function conectarClaude() {
+  if (!config.conector) return abrirAyuda();
+  verConexion('cargando');
+  $('con-cargando').textContent = 'Abriendo Claude en el servidor…';
+  $('conectar').showModal();
+  if (!pedirConexion({ t: 'conectar' })) $('conectar').close();
+}
+function errorConexion(texto, pantalla) {
+  $('con-error-texto').textContent = texto;
+  $('con-pantalla').textContent = pantalla || '';
+  $('con-pantalla').hidden = !pantalla;
+  verConexion('error');
+}
+function alConectar(m) {
+  if (m.ref !== conexionRef) return;
+  if (m.estado === 'login') {
+    agenteEnLogin = m.agente;
+    if (m.url) $('con-enlace').href = m.url;
+    $('con-enviar').disabled = false;
+    if (m.error) avisar(m.error);
+    verConexion('login');
+  } else if (m.estado === 'listo') {
+    $('con-codigo').value = '';
+    $('conectar').close();
+    porSeleccionar = m.sessionId;
+    if (sesiones.has(porSeleccionar)) { seleccionar(porSeleccionar); porSeleccionar = ''; }
+  } else if (m.estado === 'desconocido') {
+    errorConexion('Claude muestra una pantalla que no sé responder sola. Entra al servidor y atiéndela con: tmux attach -t ' + m.agente, m.pantalla);
+  } else {
+    errorConexion(m.error || 'No se pudo conectar.');
+  }
+}
+$('f-codigo').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const codigo = $('con-codigo').value.trim();
+  if (!codigo) return;
+  $('con-enviar').disabled = true;
+  $('con-cargando').textContent = 'Comprobando el código…';
+  verConexion('cargando');
+  if (!pedirConexion({ t: 'codigo', agente: agenteEnLogin, codigo })) { $('con-enviar').disabled = false; verConexion('login'); }
+});
+$('btn-terminar').addEventListener('click', () => {
+  const s = seleccion && sesiones.get(seleccion);
+  if (!s) return;
+  $('terminar-texto').textContent = '¿Terminar a ' + s.nombre + '? Se cierra su sesión de Claude y ya no recibirá órdenes.';
+  $('terminar').showModal();
+});
+$('terminar-no').addEventListener('click', () => $('terminar').close());
+$('terminar-si').addEventListener('click', () => {
+  $('terminar').close();
+  if (seleccion) enviar({ t: 'terminar', id: seleccion, ref: 'f' + Date.now() });
+});
+$('btn-ayuda').addEventListener('click', conectarClaude);
 $('btn-salir').addEventListener('click', async () => {
   try { await fetch('/api/salir', { method: 'POST', credentials: 'same-origin' }); } catch {}
   location.replace('/login.html');
 });
-document.querySelector('[data-abre-ayuda]').addEventListener('click', abrirAyuda);
+document.querySelector('[data-abre-ayuda]').addEventListener('click', conectarClaude);
 
 function enviar(msg) {
   if (!ws || ws.readyState !== 1) { avisar('Sin conexión con la oficina; reintentando…'); return false; }
@@ -364,8 +428,11 @@ function conectar() {
       pintarTodo();
     } else if (m.t === 'sesion') {
       sesiones.set(m.s.id, m.s); pintarTodo();
+      if (m.s.id === porSeleccionar) { seleccionar(porSeleccionar); porSeleccionar = ''; }
     } else if (m.t === 'quitar') {
       sesiones.delete(m.id); borradores.delete(m.id); if (seleccion === m.id) seleccionar(null); pintarTodo();
+    } else if (m.t === 'conexion') {
+      if (m.ref && m.ref[0] === 'f') { if (m.error) avisar(m.error); } else alConectar(m);
     } else if (m.t === 'respuesta') {
       if (!ordenRespondida(m) && m.error) avisar(m.error);
     }

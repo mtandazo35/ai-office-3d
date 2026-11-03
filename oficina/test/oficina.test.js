@@ -753,3 +753,61 @@ test('una sesión vista solo por su transcript no acepta órdenes hasta su prime
   await ev(o, 'UserPromptSubmit', { prompt: 'x' });
   assert.ok(o.nuevaOrden('s1', 'hola').orden);
 });
+
+test('un agente abierto por el conector acepta órdenes y se le escriben si está parado', async () => {
+  const o = new Oficina();
+  const s = o.agenteConectado('t1', '/x/proy');
+  assert.equal(s.enTerminal, true);
+  assert.equal(o.vista(s).enTerminal, true);
+  assert.ok(o.nuevaOrden('t1', 'haz esto').orden);
+  assert.equal(o.tomarParaTerminal('t1'), 'haz esto');
+  assert.equal(s.ordenes[0].estado, 'entregada');
+  assert.equal(s.ordenes[0].via, 'terminal');
+  assert.equal(s.estado, 'pensando');
+  assert.equal(o.tomarParaTerminal('t1'), null, 'no se entrega dos veces');
+});
+
+test('si no se pudo escribir al agente, la orden vuelve a la cola y él sigue parado', () => {
+  const o = new Oficina();
+  const s = o.agenteConectado('t1', '/x');
+  o.nuevaOrden('t1', 'haz esto');
+  o.tomarParaTerminal('t1');
+  assert.equal(o.devolverLote('t1'), true);
+  assert.equal(s.ordenes[0].estado, 'pendiente');
+  assert.equal(s.estado, 'inactivo');
+});
+
+test('un agente ocupado o sin terminal no recibe órdenes por escrito: van por los hooks', async () => {
+  const o = new Oficina();
+  o.agenteConectado('s1', base.cwd);
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  o.nuevaOrden('s1', 'luego');
+  assert.equal(o.tomarParaTerminal('s1'), null);
+  const r = await ev(o, 'PostToolUse', { tool_name: 'Read' });
+  assert.match(r.hookSpecificOutput.additionalContext, /luego/);
+  const otra = new Oficina();
+  otra.sesion('s2', '/x');
+  otra.nuevaOrden('s2', 'algo');
+  assert.equal(otra.tomarParaTerminal('s2'), null);
+});
+
+test('un agente que ya no está abierto termina y no acepta más órdenes', () => {
+  const o = new Oficina();
+  const s = o.agenteConectado('t1', '/x');
+  const { orden } = o.nuevaOrden('t1', 'pendiente');
+  o.agenteCerrado('t1', 'ya no está abierto');
+  assert.equal(s.estado, 'terminada');
+  assert.equal(s.enTerminal, false);
+  assert.equal(orden.estado, 'cancelada');
+  assert.ok(o.nuevaOrden('t1', 'otra').error);
+  o.agenteCerrado('no-existe', 'x');
+});
+
+test('agenteConectado no repite avisos si ya lo sabía', () => {
+  const o = new Oficina();
+  let avisos = 0;
+  o.agenteConectado('t1', '/x');
+  o.on('sesion', () => { avisos += 1; });
+  o.agenteConectado('t1', '/x');
+  assert.equal(avisos, 0);
+});

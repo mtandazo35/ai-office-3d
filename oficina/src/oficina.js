@@ -198,7 +198,7 @@ class Oficina extends EventEmitter {
         id, nombre: perfil.nombre || this.nombreAutomatico(id), rol: perfil.rol || '', genero: perfil.genero || '', cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
         estado: 'inactivo', herramienta: '', detalle: '', ultimoPrompt: '', ultimoMensaje: '',
         permiso: '', inicio: this.ahora(), ultimaActividad: this.ahora(),
-        tokens: { contexto: 0, salida: 0 }, subagentes: {}, subagentesFin: new Set(), ordenes: [], guardia: false, log: [],
+        tokens: { contexto: 0, salida: 0 }, subagentes: {}, subagentesFin: new Set(), enTerminal: false, ordenes: [], guardia: false, log: [],
         herramientasUsadas: 0, turnos: 0, modoPermisos: '', continuaciones: 0
       };
       this.sesiones.set(id, s);
@@ -220,7 +220,7 @@ class Oficina extends EventEmitter {
   vista(s) {
     return {
       id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
-      estado: estadoVisto(s), herramienta: s.herramienta, detalle: s.detalle,
+      enTerminal: s.enTerminal, estado: estadoVisto(s), herramienta: s.herramienta, detalle: s.detalle,
       ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso, modoPermisos: s.modoPermisos,
       inicio: s.inicio, ultimaActividad: s.ultimaActividad, tokens: { ...s.tokens },
       subagentes: Object.values(s.subagentes).map((a) => ({ ...a })),
@@ -366,7 +366,7 @@ class Oficina extends EventEmitter {
     if (!s) return { error: 'La sesión ya no existe.' };
     if (s.estado === 'terminada') return { error: 'La sesión ha terminado: ya no recibe órdenes.' };
     // Sin hooks no hay por dónde entregarla: quedaría en cola para siempre.
-    if (s.origen !== 'hooks') return { error: 'Esta sesión no está conectada a la oficina: no recibe órdenes.' };
+    if (s.origen !== 'hooks' && !s.enTerminal) return { error: 'Esta sesión no está conectada a la oficina: no recibe órdenes.' };
     const t = typeof texto === 'string' ? texto.trim() : '';
     if (!t) return { error: 'La orden está vacía.' };
     if (t.length > 4000) return { error: 'La orden supera 4000 caracteres.' };
@@ -432,6 +432,39 @@ class Oficina extends EventEmitter {
     this.registrar(s, 'orden', 'Entregada a Claude (' + via + '): ' + lista.map((o) => o.texto).join(' | '));
   }
 
+  // Agente abierto en tmux por el conector: se le puede escribir aunque esté parado.
+  agenteConectado(id, cwd) {
+    this.cerradas.delete(id);
+    const nueva = !this.sesiones.has(id);
+    const s = this.sesion(id, cwd);
+    if (s.enTerminal && !nueva) return s;
+    s.enTerminal = true;
+    if (nueva) this.registrar(s, 'sesion', 'Agente abierto desde la oficina');
+    this.cambio(s);
+    return s;
+  }
+
+  // Ya no está abierto en tmux.
+  agenteCerrado(id, motivo) {
+    const s = this.sesiones.get(id);
+    if (!s || !s.enTerminal) return;
+    s.enTerminal = false;
+    if (s.estado !== 'terminada') this.procesar({ session_id: id, hook_event_name: 'SessionEnd', reason: motivo });
+    else this.cambio(s);
+  }
+
+  // Un agente parado no ejecuta hooks: sus órdenes se le escriben directamente. Devuelve el texto o null.
+  tomarParaTerminal(id) {
+    const s = this.sesiones.get(id);
+    if (!s || !s.enTerminal || s.estado !== 'inactivo' || this.esperas.has(id)) return null;
+    const lista = this.lote(s);
+    if (!lista.length) return null;
+    this.marcarEntregadas(s, lista, 'terminal');
+    this.estado(s, 'pensando');
+    this.cambio(s);
+    return lista.map((o) => o.texto).join(' ');
+  }
+
   // La respuesta que llevaba el último lote no pudo enviarse: vuelve a la cola.
   devolverLote(id) {
     const s = this.sesiones.get(id);
@@ -440,6 +473,7 @@ class Oficina extends EventEmitter {
     s.ultimoLote = null;
     if (!lista.length) return false;
     if (lista[0].via === 'Stop' && s.continuaciones > 0) s.continuaciones -= 1;
+    if (lista[0].via === 'terminal' && s.estado === 'pensando') this.estado(s, 'inactivo');
     lista.forEach((o) => { o.estado = 'pendiente'; delete o.entregada; delete o.via; });
     this.registrar(s, 'orden', 'No se pudo entregar: vuelve a la cola');
     this.cambio(s);

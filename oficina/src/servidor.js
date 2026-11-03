@@ -19,6 +19,7 @@ const { Oficina } = require('./oficina');
 const { Transcripts } = require('./transcripts');
 const { Acceso, direccionesEscucha, obtenerSecreto } = require('./acceso');
 const tls = require('./tls');
+const { crearConector } = require('./conector');
 
 const env = process.env;
 const PUERTO = Number(env.PUERTO_INTERNO || 7777);
@@ -56,6 +57,7 @@ const transcripts = new Transcripts(oficina, { raiz: RAIZ_CLAUDE });
 // Sin contraseña propia, el secreto generado hace de contraseña: Origin y Host no bastan como barrera,
 // porque cualquier programa del equipo los falsifica.
 const ARCHIVO_SECRETO = path.join(DATOS, 'panel-secreto');
+const conector = crearConector(env.CONECTOR_SOCKET || path.join(RAIZ_CLAUDE, 'ai-office', 'conector.sock'), { forzado: !!env.CONECTOR_SOCKET });
 const acceso = new Acceso({ password: PASSWORD || obtenerSecreto(ARCHIVO_SECRETO, log), confiarProxy: env.CONFIAR_PROXY === '1' });
 
 // ---------- Utilidades de seguridad ----------
@@ -227,7 +229,7 @@ function soloHooks(req, res) {
 }
 
 function configPublica() {
-  return { token: !!tokenEsperado(), demo: DEMO, guardiaMaxMin: GUARDIA_MAX_MIN, transcripts: fs.existsSync(path.join(RAIZ_CLAUDE, 'projects')), auth: acceso.activo, remoto: REMOTO, usuario: /^[a-z_][a-z0-9_-]*$/.test(env.OFICINA_USUARIO || '') ? env.OFICINA_USUARIO : '' };
+  return { token: !!tokenEsperado(), demo: DEMO, guardiaMaxMin: GUARDIA_MAX_MIN, transcripts: fs.existsSync(path.join(RAIZ_CLAUDE, 'projects')), auth: acceso.activo, remoto: REMOTO, conector: conector.disponible(), usuario: /^[a-z_][a-z0-9_-]*$/.test(env.OFICINA_USUARIO || '') ? env.OFICINA_USUARIO : '' };
 }
 
 // ---------- WebSocket ----------
@@ -246,6 +248,32 @@ function enviarTodos(msg) {
   for (const c of wss.clients) if (c.readyState === 1) c.send(datos);
 }
 
+function atenderConector(ws, m, promesa) {
+  promesa.catch((e) => ({ error: e.message })).then((r) => {
+    if (r.estado === 'listo' && r.sessionId) oficina.agenteConectado(r.sessionId, r.cwd);
+    if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'conexion', ref: m.ref, ...r }));
+  });
+}
+
+function entregarPorTerminal(id) {
+  const texto = oficina.tomarParaTerminal(id);
+  if (!texto) return;
+  conector.pedir('POST', '/enviar', { sessionId: id, texto }).catch((e) => {
+    log('No pude escribirle al agente:', e.message);
+    oficina.devolverLote(id);
+  });
+}
+
+// Reconcilia con lo que hay abierto en tmux, también tras reiniciar la oficina.
+async function revisarAgentes() {
+  if (!conector.disponible()) return;
+  let abiertos;
+  try { abiertos = (await conector.pedir('GET', '/estado', undefined, 5000)).agentes; } catch { return; }
+  const ids = new Set(abiertos.map((a) => a.sessionId));
+  for (const a of abiertos) oficina.agenteConectado(a.sessionId, a.cwd);
+  for (const s of oficina.sesiones.values()) if (s.enTerminal && !ids.has(s.id)) oficina.agenteCerrado(s.id, 'ya no está abierto');
+}
+
 wss.on('connection', (ws) => {
   // Sin este manejador, un frame inválido o de más de 64 KB tumba el proceso.
   ws.on('error', (e) => log('ws', e.message));
@@ -256,9 +284,13 @@ wss.on('connection', (ws) => {
     if (++cuenta > 40) return; // límite sencillo: 40 mensajes cada 10 s
     let m;
     try { m = JSON.parse(raw); } catch { return; }
-    if (!m || typeof m !== 'object' || typeof m.id !== 'string') return;
+    if (!m || typeof m !== 'object') return;
+    if (m.t === 'conectar') return void atenderConector(ws, m, conector.pedir('POST', '/agentes', {}));
+    if (m.t === 'codigo') return void atenderConector(ws, m, conector.pedir('POST', '/codigo', { agente: String(m.agente || ''), codigo: m.codigo }));
+    if (typeof m.id !== 'string') return;
+    if (m.t === 'terminar') return void atenderConector(ws, m, conector.pedir('POST', '/terminar', { sessionId: m.id }).then((r) => { oficina.agenteCerrado(m.id, 'cerrado desde la oficina'); return r; }));
     let r;
-    if (m.t === 'orden') r = oficina.nuevaOrden(m.id, m.texto);
+    if (m.t === 'orden') { r = oficina.nuevaOrden(m.id, m.texto); if (r.orden) entregarPorTerminal(m.id); }
     else if (m.t === 'cancelar') r = { ok: oficina.cancelarOrden(m.id, String(m.ordenId || '')) };
     else if (m.t === 'guardia') r = { ok: oficina.ponerGuardia(m.id, !!m.activa) };
     else if (m.t === 'nombre') r = oficina.renombrar(m.id, m.nombre);
@@ -310,6 +342,8 @@ async function arrancar() {
 }
 
 setInterval(() => oficina.limpiar(), 30000).unref();
+setInterval(() => { revisarAgentes().catch(() => {}); }, 15000).unref();
+revisarAgentes().catch(() => {});
 setInterval(() => {
   acceso.limpiar();
   // Cierra los WebSocket cuya sesión caducó.

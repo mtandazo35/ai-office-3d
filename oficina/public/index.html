@@ -52,6 +52,7 @@
           <p id="d-cwd" class="mono tenue"></p>
         </div>
         <button id="btn-renombrar" class="btn sec mini" type="button">Renombrar</button>
+        <button id="btn-terminar" class="btn sec mini" type="button" hidden>Terminar</button>
       </div>
       <div class="chips" id="d-chips"></div>
 
@@ -139,6 +140,39 @@
     </ol>
   </details>
   <p class="nota">Las órdenes solo llegan a sesiones abiertas y conectadas: al cerrar una sesión ya no recibe ninguna, y lo que tuviera en cola se cancela. Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el modo de permisos de cada sesión: si pide aprobación, la sigue pidiendo en la terminal o en VS Code; en modo bypass o auto, una orden se ejecuta sin que nadie apruebe nada. El detalle del agente avisa cuando es así.</p>
+</dialog>
+
+<dialog id="conectar">
+  <form method="dialog" class="ayuda-cab">
+    <h2>Conectar Claude Code</h2>
+    <button class="btn sec mini" aria-label="Cerrar">✕</button>
+  </form>
+  <p id="con-cargando" role="status">Abriendo Claude en el servidor…</p>
+  <div id="con-login" hidden>
+    <ol class="pasos">
+      <li><a id="con-enlace" class="btn" target="_blank" rel="noopener noreferrer">Autorizar con tu cuenta de Claude</a></li>
+      <li>Autoriza, copia el código que te muestre y pégalo aquí:
+        <form id="f-codigo" class="fila-codigo">
+          <label for="con-codigo" class="oculto">Código de autorización</label>
+          <input id="con-codigo" type="text" autocomplete="off" spellcheck="false" required>
+          <button id="con-enviar" class="btn" type="submit">Conectar</button>
+        </form>
+      </li>
+    </ol>
+    <p class="nota">Solo hace falta la primera vez en este servidor.</p>
+  </div>
+  <div id="con-error" hidden>
+    <p id="con-error-texto"></p>
+    <pre id="con-pantalla" hidden></pre>
+  </div>
+</dialog>
+
+<dialog id="terminar">
+  <p id="terminar-texto"></p>
+  <div class="modal-acciones">
+    <button id="terminar-no" class="btn sec" type="button">Cancelar</button>
+    <button id="terminar-si" class="btn" type="button">Terminar</button>
+  </div>
 </dialog>
 
 <dialog id="aviso">
