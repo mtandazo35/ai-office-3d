@@ -11,6 +11,22 @@ Oficina virtual en 3D, en tu propio equipo, para **ver trabajar a tus sesiones d
 
 Funciona con hooks `http` de Claude Code. No necesita scripts en el equipo ni salir a internet: three.js va dentro de la imagen.
 
+## ⚡ Quick install (one-liner)
+
+En el servidor donde trabaja Claude Code, como root o con `sudo`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mtandazo35/ai-office-3d/main/install.sh | sudo bash
+```
+
+Instala Docker si falta, clona el repo en `/root/ai-office-3d`, levanta la oficina y añade los hooks. El contenedor corre con un usuario normal: el que usa `sudo` o, si entras como root, uno nuevo llamado `oficina`, que acepta tus mismas claves SSH. Si el servidor tiene menos de 3 GB de RAM y no tiene swap, crea 2 GB. Se puede repetir para actualizar, y respeta el `.env` que ya exista.
+
+La oficina queda en modo local: solo escucha en `127.0.0.1` y no abre ningún puerto a internet. Al terminar, el script muestra el túnel SSH y el enlace de un solo uso para entrar. Claude Code no se instala con este script.
+
+Probado en Debian 13. Solo admite sistemas con `apt`, y en otras versiones de Debian o Ubuntu aún no se ha comprobado. Antes de ejecutarlo puedes leer [`install.sh`](install.sh).
+
+Si prefieres hacerlo paso a paso, o publicar el panel en la IP del servidor, sigue con la sección siguiente.
+
 ## Puesta en marcha en el VPS
 
 Requisitos: Docker con Compose y una versión reciente de Claude Code (con hooks de tipo `http`) **trabajando en el mismo VPS**.
