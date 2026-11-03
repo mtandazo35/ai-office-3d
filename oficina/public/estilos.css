@@ -215,3 +215,10 @@ body.pagina-agentes { overflow: auto; }
   .agente-acciones { grid-column: 1 / -1; justify-content: flex-end; }
 }
 @media (max-width: 480px) { .agente { grid-template-columns: 1fr; } }
+
+/* El nombre con rol cede espacio: el estado siempre se lee entero. */
+.lista .l-cab { display: flex; gap: 8px; }
+.lista .l-proy { min-width: 0; flex: 1; }
+.lista .l-est { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lista li, .lista button { min-width: 0; width: 100%; }
+.lista .l-cab { width: 100%; min-width: 0; }

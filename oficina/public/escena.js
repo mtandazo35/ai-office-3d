@@ -20,6 +20,20 @@ const REDUCIDO = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CAMISAS = ['#ff6b6b', '#4ecdc4', '#ffd166', '#6c8cff', '#c77dff', '#06d6a0', '#ff9f1c', '#ef476f', '#118ab2', '#f78c6b'];
 const PIELES = ['#f6d3b3', '#eebb99', '#d9a066', '#c68a5e', '#a86b45', '#7a4b2e'];
 const PELOS = ['#2b2118', '#5a3825', '#d4a017', '#b5482b', '#1c1c1c', '#9aa0a6', '#3d5a80', '#7b2d8b'];
+const ZAPATOS = ['#1f1f1f', '#f8f9fa', '#e76f51', '#264653'];
+
+// El rol elige un accesorio por palabras clave; devops va antes que "dev".
+function accesorioDe(rol) {
+  const r = String(rol || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (/devops|infra|sysadmin|redes/.test(r)) return 'casco';
+  if (/segur|secur/.test(r)) return 'gorra';
+  if (/revis|qa|test|audit|calidad/.test(r)) return 'gafas';
+  if (/coordin|jef|lider|lead|arquitect|gerent/.test(r)) return 'corbata';
+  if (/program|desarroll|dev|front|back|codigo/.test(r)) return 'auriculares';
+  return '';
+}
+const aspectoDe = (s) => (s.genero || '') + '|' + accesorioDe(s.rol);
+
 const TAZAS = ['#ef476f', '#ffd166', '#06d6a0', '#118ab2', '#f8f9fa'];
 
 function hash(s) { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -273,27 +287,28 @@ export function crearEscena(canvas, { alSeleccionar }) {
 
     g.scale.setScalar(0.01);
     scene.add(g);
-    e.p = nuevoPersonaje(h, s.genero);
-    e.genero = s.genero || '';
+    e.p = nuevoPersonaje(h, s.genero, s.rol);
+    e.aspecto = aspectoDe(s);
     scene.add(e.p.raiz);
     escritorios.set(s.id, e);
     return e;
   }
 
-  // El género cambia el peinado; el resto del aspecto sigue saliendo del id de la sesión.
-  function cambiarPersonaje(e, genero) {
-    const v = e.p, n = nuevoPersonaje(e.h, genero);
-    Object.assign(n, { modo: v.modo, ruta: v.ruta, saludo: v.saludo, sacudida: v.sacudida, mano: v.mano });
+  // El género y el rol cambian peinado y accesorio; el resto sigue saliendo del id de la sesión.
+  function cambiarPersonaje(e, s) {
+    const v = e.p, n = nuevoPersonaje(e.h, s.genero, s.rol);
+    Object.assign(n, { modo: v.modo, ruta: v.ruta, saludo: v.saludo, sacudida: v.sacudida, mano: v.mano, proximoDescanso: v.proximoDescanso, finDescanso: v.finDescanso });
     n.raiz.position.copy(v.raiz.position);
     n.raiz.rotation.copy(v.raiz.rotation);
     n.raiz.visible = v.raiz.visible;
     scene.remove(v.raiz); liberar(v.raiz);
     scene.add(n.raiz);
     e.p = n;
-    e.genero = genero || '';
+    e.aspecto = aspectoDe(s);
   }
 
-  function nuevoPersonaje(h, genero) {
+  function nuevoPersonaje(h, genero, rol) {
+    const accesorio = accesorioDe(rol);
     const raiz = new THREE.Group();
     const camisa = toon(elegir(CAMISAS, h)), piel = toon(elegir(PIELES, h, 4)), pelo = toon(elegir(PELOS, h, 9));
     const pantalon = toon(elegir(['#2b2d42', '#3d5a80', '#5c4033', '#495057'], h, 13));
@@ -303,7 +318,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     p.piernas = [-0.14, 0.14].map((x) => {
       const piv = new THREE.Group(); piv.position.set(x, 0, 0); cadera.add(piv);
       const pierna = malla(new THREE.CapsuleGeometry(0.11, 0.36, 4, 10), pantalon); pierna.position.y = -0.3; piv.add(pierna);
-      const zapato = malla(new THREE.BoxGeometry(0.2, 0.12, 0.3), toon('#1f1f1f')); zapato.position.set(0, -0.56, 0.06); piv.add(zapato);
+      const zapato = malla(new THREE.BoxGeometry(0.2, 0.12, 0.3), toon(elegir(ZAPATOS, h, 17))); zapato.position.set(0, -0.56, 0.06); piv.add(zapato);
       return piv;
     });
     p.torso = malla(new THREE.CapsuleGeometry(0.3, 0.42, 6, 14), camisa); p.torso.position.y = 0.98; raiz.add(p.torso);
@@ -320,12 +335,63 @@ export function crearEscena(canvas, { alSeleccionar }) {
     if (genero === 'femenino') { const largo = malla(new THREE.CapsuleGeometry(0.27, 0.42, 6, 14), pelo); largo.position.set(0, -0.3, -0.2); p.cabeza.add(largo); }
     if (genero !== 'masculino' && h % 4 === 0) { const mono = malla(new THREE.SphereGeometry(0.14, 12, 10), pelo); mono.position.set(0, 0.32, -0.25); p.cabeza.add(mono); }
     const negro = toon('#1b1b1b');
-    p.ojos = [-0.13, 0.13].map((x) => { const o = malla(new THREE.SphereGeometry(0.055, 10, 8), negro, false); o.position.set(x, 0.02, 0.32); p.cabeza.add(o); return o; });
+    p.ojos = [-0.13, 0.13].map((x) => { const o = malla(new THREE.SphereGeometry(0.07, 12, 10), negro, false); o.position.set(x, 0.02, 0.32); p.cabeza.add(o); return o; });
     const brillo = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-    p.ojos.forEach((o) => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), brillo); b.position.set(0.02, 0.02, 0.045); o.add(b); });
+    p.ojos.forEach((o) => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), brillo); b.position.set(0.025, 0.03, 0.058); o.add(b); });
     [-0.22, 0.22].forEach((x) => { const m = new THREE.Mesh(new THREE.CircleGeometry(0.06, 12), new THREE.MeshBasicMaterial({ color: '#ff8fa3', transparent: true, opacity: 0.6 })); m.position.set(x, -0.09, 0.315); m.rotation.y = x * 1.4; p.cabeza.add(m); });
     p.boca = malla(new THREE.TorusGeometry(0.06, 0.015, 6, 12, Math.PI), negro, false); p.boca.position.set(0, -0.12, 0.33); p.boca.rotation.z = Math.PI; p.cabeza.add(p.boca);
-    if (h % 5 === 1) { // gafas
+    p.bocaO = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), toon('#5c2a2a'));
+    p.bocaO.scale.z = 0.4; p.bocaO.position.set(0, -0.13, 0.335); p.bocaO.visible = false; p.cabeza.add(p.bocaO);
+    p.cejas = [-0.13, 0.13].map((x) => { const c = malla(new THREE.BoxGeometry(0.13, 0.028, 0.03), pelo, false); c.position.set(x, 0.125, 0.335); p.cabeza.add(c); return c; });
+
+    // Peinados
+    const peinado = (h >>> 11) % 4;
+    if (peinado === 1) {
+      const flequillo = malla(new THREE.BoxGeometry(0.52, 0.11, 0.14), pelo, false); flequillo.position.set(0, 0.2, 0.28); flequillo.rotation.x = -0.45; p.cabeza.add(flequillo);
+    } else if (peinado === 2) {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const punta = malla(new THREE.ConeGeometry(0.09, 0.24, 8), pelo, false);
+        punta.position.set(Math.cos(a) * 0.2, 0.36, Math.sin(a) * 0.2 - 0.04);
+        punta.rotation.set(Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5);
+        p.cabeza.add(punta);
+      }
+    } else if (peinado === 3) {
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const rizo = malla(new THREE.SphereGeometry(0.115, 10, 8), pelo, false);
+        rizo.position.set(Math.cos(a) * 0.28, 0.2 + (i % 2) * 0.07, Math.sin(a) * 0.28 - 0.04);
+        p.cabeza.add(rizo);
+      }
+    }
+
+    // Ropa: cuello de camisa y tarjeta de la oficina
+    const cuello = malla(new THREE.TorusGeometry(0.2, 0.05, 8, 18), toon('#ffffff'), false); cuello.rotation.x = Math.PI / 2; cuello.position.y = 1.4; raiz.add(cuello);
+    const tarjeta = malla(new THREE.BoxGeometry(0.13, 0.17, 0.02), toon('#ffffff'), false); tarjeta.position.set(0.14, 1.06, 0.3); raiz.add(tarjeta);
+    const franja = malla(new THREE.BoxGeometry(0.13, 0.05, 0.022), toon(elegir(CAMISAS, h, 19)), false); franja.position.set(0.14, 1.12, 0.3); raiz.add(franja);
+
+    // Accesorio según el rol
+    if (accesorio === 'casco' || accesorio === 'gorra') {
+      const color = accesorio === 'casco' ? '#ffb703' : '#1d3557';
+      const copa = malla(new THREE.SphereGeometry(0.41, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), toon(color)); copa.position.y = 0.07; p.cabeza.add(copa);
+      if (accesorio === 'casco') { const ala = malla(new THREE.CylinderGeometry(0.46, 0.46, 0.04, 20), toon(color), false); ala.position.y = 0.09; p.cabeza.add(ala); }
+      else {
+        const visera = malla(new THREE.BoxGeometry(0.34, 0.03, 0.26), toon(color), false); visera.position.set(0, 0.12, 0.4); p.cabeza.add(visera);
+        const escudo = malla(new THREE.BoxGeometry(0.14, 0.14, 0.02), toon('#ffd166'), false); escudo.position.set(-0.14, 1.08, 0.3); escudo.rotation.z = Math.PI / 4; raiz.add(escudo);
+      }
+    } else if (accesorio === 'corbata') {
+      const nudo = malla(new THREE.BoxGeometry(0.09, 0.07, 0.04), toon('#9d0208'), false); nudo.position.set(0, 1.3, 0.25); raiz.add(nudo);
+      const corbata = malla(new THREE.BoxGeometry(0.1, 0.36, 0.03), toon('#d00000'), false); corbata.position.set(0, 1.08, 0.3); raiz.add(corbata);
+    } else if (accesorio === 'auriculares') {
+      const metal = toon('#2b2d42');
+      const arco = malla(new THREE.TorusGeometry(0.4, 0.028, 8, 22, Math.PI), metal, false); arco.position.y = 0.02; p.cabeza.add(arco);
+      [-0.4, 0.4].forEach((x) => { const a = malla(new THREE.CylinderGeometry(0.11, 0.11, 0.07, 14), toon('#ef476f'), false); a.rotation.z = Math.PI / 2; a.position.set(x, 0.02, 0); p.cabeza.add(a); });
+    }
+
+    // Taza para la pausa del café
+    p.tazaMano = taza(elegir(TAZAS, h, 3)); p.tazaMano.position.set(0, -0.6, 0.05); p.tazaMano.scale.setScalar(0.8); p.tazaMano.visible = false; p.brazos[1].add(p.tazaMano);
+
+    if (h % 5 === 1 || accesorio === 'gafas') { // gafas
       const montura = toon('#14213d');
       [-0.13, 0.13].forEach((x) => { const a = malla(new THREE.TorusGeometry(0.085, 0.015, 6, 16), montura, false); a.position.set(x, 0.02, 0.34); p.cabeza.add(a); });
       const puente = malla(new THREE.BoxGeometry(0.08, 0.015, 0.015), montura, false); puente.position.set(0, 0.03, 0.35); p.cabeza.add(puente);
@@ -334,6 +400,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     p.bocadillo = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, toneMapped: false }));
     p.bocadillo.position.set(0.55, 2.35, 0); p.bocadillo.visible = false; raiz.add(p.bocadillo);
     p.tipoBocadillo = '';
+    raiz.scale.setScalar(1.15);
     raiz.visible = false;
     return p;
   }
@@ -361,7 +428,13 @@ export function crearEscena(canvas, { alSeleccionar }) {
   }
 
   // Posiciones del mundo de un escritorio
-  const asientoDe = (e) => new THREE.Vector3(e.destino.x, 0.1, e.destino.z + 1.25);
+  const asientoDe = (e) => new THREE.Vector3(e.destino.x, 0, e.destino.z + 1.25);
+  // Pausa para el café: cada agente tiene su sitio frente a la barra y llega por los pasillos.
+  const puntoDescanso = (e) => new THREE.Vector3(dimSala.W / 2 - 2.4 + ((e.h % 4) - 1.5), 0, -dimSala.D / 2 + 2.1);
+  function rutaDescanso(e) {
+    const a = asientoDe(e), lateral = e.destino.x + 2.6, frente = e.destino.z + 2.6, fondo = -dimSala.D / 2 + 3.2;
+    return [new THREE.Vector3(a.x, 0, frente), new THREE.Vector3(lateral, 0, frente), new THREE.Vector3(lateral, 0, fondo), puntoDescanso(e)];
+  }
   function rutaEntrada(e) {
     const a = asientoDe(e), lateral = e.destino.x + 2.6, frente = e.destino.z + 2.6;
     return [dimSala.puerta.clone(), new THREE.Vector3(lateral, 0, dimSala.zPasillo), new THREE.Vector3(lateral, 0, frente), new THREE.Vector3(a.x, 0, frente), new THREE.Vector3(a.x, 0, a.z + 0.35)];
@@ -404,7 +477,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
   function actualizarEscritorio(e, s) {
     const anterior = e.previo;
     e.s = s;
-    if ((s.genero || '') !== e.genero) cambiarPersonaje(e, s.genero);
+    if (aspectoDe(s) !== e.aspecto) cambiarPersonaje(e, s);
     pintarPantalla(e, s);
     const color = COLORES[s.estado] || COLORES.inactivo;
     e.anillo.material.color.set(color);
@@ -473,7 +546,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     const cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(n))));
     const filas = Math.max(1, Math.ceil(n / cols));
     const dx = 7.5, dz = 7.5;
-    const W = Math.max(30, cols * dx + 15), D = Math.max(24, filas * dz + 13);
+    const W = Math.max(24, cols * dx + 14), D = Math.max(20, filas * dz + 12);
     if (W !== dimSala.W || D !== dimSala.D) construirSala(W, D);
     lista.forEach((e, i) => {
       const c = i % cols, f = Math.floor(i / cols);
@@ -596,10 +669,11 @@ export function crearEscena(canvas, { alSeleccionar }) {
     const mov = REDUCIDO ? 0.25 : 1;
     let andando = false;
 
-    if (p.modo === 'entrando' || p.modo === 'saliendo') {
+    if (p.modo === 'entrando' || p.modo === 'saliendo' || p.modo === 'paseando') {
       const destino = p.ruta[0];
       if (!destino) {
         if (p.modo === 'entrando') { p.modo = 'sentado'; }
+        else if (p.modo === 'paseando') { p.modo = 'descanso'; p.finDescanso = t + 25 + e.h % 20; }
         else { p.modo = 'fuera'; p.raiz.visible = false; efectos.chispas(dimSala.puerta.clone().setY(1.5), '#ffffff', 12); }
       } else {
         tmp.subVectors(destino, p.raiz.position); tmp.y = 0;
@@ -612,15 +686,40 @@ export function crearEscena(canvas, { alSeleccionar }) {
         andando = true;
       }
     }
+    // Para pedir permiso, esperar órdenes o celebrar se levanta y mira a quien observa.
+    const haciaCamara = Math.atan2(camera.position.x - p.raiz.position.x, camera.position.z - p.raiz.position.z);
+    const dePie = p.modo === 'sentado' && (st === 'esperando' || st === 'guardia' || p.saludo > 0);
     if (p.modo === 'sentado') {
-      p.raiz.position.lerp(asientoDe(e), 1 - Math.pow(0.0005, dt));
-      p.raiz.rotation.y = girar(p.raiz.rotation.y, Math.PI, dt * 6);
+      const sitio = asientoDe(e);
+      if (dePie) { sitio.x += 1.35; sitio.z += 0.35; }
+      p.raiz.position.lerp(sitio, 1 - Math.pow(0.0005, dt));
+      p.raiz.rotation.y = girar(p.raiz.rotation.y, dePie ? haciaCamara : Math.PI, dt * 6);
+      if (p.saludo > 0 && !REDUCIDO) p.raiz.position.y = Math.abs(Math.sin(t * 9)) * 0.14;
+      if (p.proximoDescanso === undefined) p.proximoDescanso = t + 30 + e.h % 40;
+      const ocioso = st === 'inactivo' && s.ultimaActividad && Date.now() - s.ultimaActividad > 45000;
+      if (ocioso && !dePie && !REDUCIDO && t > p.proximoDescanso && e.id !== seleccionado) {
+        p.ruta = rutaDescanso(e);
+        p.raiz.position.y = 0;
+        p.modo = 'paseando';
+      }
+    } else if (p.modo === 'descanso') {
+      p.raiz.position.lerp(puntoDescanso(e), 1 - Math.pow(0.02, dt));
+      p.raiz.rotation.y = girar(p.raiz.rotation.y, haciaCamara, dt * 4);
+      if (st !== 'inactivo' || t > p.finDescanso) {
+        const a = asientoDe(e);
+        p.ruta = rutaDescanso(e).reverse().slice(1);
+        p.ruta.push(new THREE.Vector3(a.x, 0, a.z + 0.35));
+        p.proximoDescanso = t + 120 + e.h % 60;
+        p.modo = 'entrando';
+      }
     }
+    p.tazaMano.visible = p.modo === 'descanso';
 
     // Piernas
     const sentado = p.modo === 'sentado';
+    const piernasDobladas = sentado && !dePie;
     p.piernas.forEach((pi, i) => {
-      const objetivo = sentado ? -Math.PI / 2 : andando ? Math.sin(t * 11 + i * Math.PI) * 0.7 * mov : 0;
+      const objetivo = piernasDobladas ? -Math.PI / 2 : andando ? Math.sin(t * 11 + i * Math.PI) * 0.7 * mov : 0;
       pi.rotation.x += (objetivo - pi.rotation.x) * Math.min(1, dt * 12);
     });
 
@@ -629,6 +728,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     p.brazos.forEach((br, i) => {
       let rx = 0, rz = 0;
       if (andando) rx = Math.sin(t * 11 + (i ? 0 : Math.PI)) * 0.6 * mov;
+      else if (p.modo === 'descanso') rx = i ? -1.15 - Math.max(0, Math.sin(t * 0.8 + p.fase)) * 0.9 * mov : -0.1; // sorbo de café
       else if (sentado) {
         if (p.saludo > 0) { rx = -Math.PI * 0.95; rz = (i ? -1 : 1) * (0.3 + Math.sin(t * 14) * 0.25 * mov); }
         else if (st === 'ejecutando') rx = -1.25 + Math.sin(t * 18 + i * 1.9) * 0.18 * mov;
@@ -646,6 +746,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     p.sacudida = Math.max(0, p.sacudida - dt * 0.8);
     let ry = 0, rxCab = 0;
     if (p.sacudida > 0) ry = Math.sin(t * 25) * 0.4 * p.sacudida;
+    else if (p.modo === 'descanso') ry = Math.sin(t * 0.5 + p.fase) * 0.4 * mov;
     else if (st === 'pensando') ry = Math.sin(t * 1.2 + p.fase) * 0.35 * mov;
     else if (st === 'inactivo' && sentado) { ry = Math.sin(t * 0.4 + p.fase) * 0.5 * mov; rxCab = 0.05; }
     else if (st === 'ejecutando') rxCab = 0.12 + Math.sin(t * 4) * 0.03 * mov;
@@ -658,7 +759,21 @@ export function crearEscena(canvas, { alSeleccionar }) {
     p.parpadeo -= dt;
     const cerrado = p.parpadeo < 0.12;
     if (p.parpadeo < 0) p.parpadeo = 2.5 + Math.random() * 3;
-    p.ojos.forEach((o) => { o.scale.y = cerrado ? 0.15 : 1; });
+    const dormido = p.modo === 'sentado' && st === 'inactivo' && s.ultimaActividad && Date.now() - s.ultimaActividad > 90000;
+    p.ojos.forEach((o) => { o.scale.y = cerrado || dormido ? 0.15 : 1; });
+    const sorpresa = st === 'esperando' || st === 'pensando';
+    p.boca.visible = !sorpresa;
+    p.bocaO.visible = sorpresa;
+    p.cejas.forEach((c, i) => {
+      const lado = i ? 1 : -1;
+      let y = 0.125, rz = 0;
+      if (st === 'error') { y = 0.105; rz = lado * 0.45; }
+      else if (st === 'esperando') { y = 0.155; rz = -lado * 0.2; }
+      else if (st === 'pensando') y = i ? 0.16 : 0.115;
+      else if (dormido) y = 0.1;
+      c.position.y += (y - c.position.y) * Math.min(1, dt * 10);
+      c.rotation.z += (rz - c.rotation.z) * Math.min(1, dt * 10);
+    });
     p.boca.scale.set(1, st === 'error' ? -1 : 1, 1);
 
     // Bocadillo
