@@ -1,5 +1,6 @@
 # Oficina IA: ve tus sesiones de Claude Code en una oficina 3D y dales órdenes.
 #
+#   mkdir -p ~/.claude/ai-office ~/.claude/projects   # antes del primer arranque (ver README)
 #   docker compose up -d --build          # levanta la oficina
 #   docker compose run --rm instalar      # instala los hooks en ~/.claude/settings.json (una vez)
 #   AI_OFFICE_DEMO=1 docker compose up    # prueba sin Claude Code, con agentes simulados
@@ -31,7 +32,11 @@ services:
       - "127.0.0.1:${PUERTO_HOOKS:-7778}:7778"
     environment:
       PUBLICAR_IP: "${PUBLICAR_IP:-127.0.0.1}"
+      # 1 = exige contraseña aunque PUBLICAR_IP sea local (detrás de un proxy inverso).
+      ACCESO_REMOTO: "${ACCESO_REMOTO:-0}"
       OFICINA_PASSWORD: "${OFICINA_PASSWORD:-}"
+      # Ruta DENTRO del contenedor; el archivo se monta aparte (ver README). Evita que la contraseña salga en docker inspect.
+      OFICINA_PASSWORD_FILE: "${OFICINA_PASSWORD_FILE:-}"
       TLS: "${TLS:-}"
       TLS_HOSTS: "${TLS_HOSTS:-}"
       TLS_CERT: "${TLS_CERT:-}"
@@ -40,8 +45,11 @@ services:
       GUARDIA_MAX_MIN: "${GUARDIA_MAX_MIN:-14}"
       AI_OFFICE_DEMO: "${AI_OFFICE_DEMO:-0}"
     volumes:
-      # Solo lectura: el token de los hooks y los transcripts (tokens y sesiones recientes).
-      - "${CLAUDE_DIR:-${HOME}/.claude}:/claude:ro"
+      # Solo lectura y solo lo necesario: transcripts (tokens y sesiones recientes) y el token de los hooks.
+      # El resto de ~/.claude (credenciales de Claude, settings.json) no entra en este contenedor.
+      # Crea estas carpetas antes de levantarlo: si no existen, Docker las crea como root.
+      - "${CLAUDE_DIR:-${HOME}/.claude}/projects:/claude/projects:ro"
+      - "${CLAUDE_DIR:-${HOME}/.claude}/ai-office:/claude/ai-office:ro"
       # Certificado autofirmado (se reutiliza entre reinicios).
       - oficina-datos:/datos
     mem_limit: 256m

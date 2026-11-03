@@ -4,16 +4,16 @@
 // Las órdenes funcionan igual: se entregan por PostToolUse o Stop y la sesión "obedece".
 
 const GUIONES = [
-  { id: 'demo-backend', cwd: '/home/manuel/proyectos/backend-isp', modelo: 'claude-opus-5-5', prompt: 'Añade paginación al endpoint de facturas',
-    pasos: [['Grep', { pattern: 'facturas', path: '/home/manuel/proyectos/backend-isp/src' }], ['Read', { file_path: '/home/manuel/proyectos/backend-isp/src/facturas/facturas.controller.ts' }],
-      ['Edit', { file_path: '/home/manuel/proyectos/backend-isp/src/facturas/facturas.service.ts' }], ['permiso', { command: 'npm test -- facturas' }],
-      ['Bash', { command: 'npm test -- facturas' }], ['Edit', { file_path: '/home/manuel/proyectos/backend-isp/src/facturas/dto/listar.dto.ts' }]] },
-  { id: 'demo-frontend', cwd: '/home/manuel/proyectos/frontend-isp', modelo: 'claude-sonnet-5-5', prompt: 'Revisa la pantalla de pagos en móvil',
-    pasos: [['Glob', { pattern: 'src/**/pagos*.tsx' }], ['Read', { file_path: '/home/manuel/proyectos/frontend-isp/src/pagos/PagosLista.tsx' }],
-      ['sub', 'Explore'], ['Edit', { file_path: '/home/manuel/proyectos/frontend-isp/src/pagos/PagosLista.tsx' }], ['Bash', { command: 'npm run lint' }]] },
-  { id: 'demo-infra', cwd: '/home/manuel/infra/suricata-ids-lab', modelo: 'claude-opus-5-5', prompt: 'Revisa por qué Suricata no envía alertas al MikroTik',
-    pasos: [['Bash', { command: 'docker compose logs --tail 80 suricata' }], ['Read', { file_path: '/home/manuel/infra/suricata-ids-lab/suricata.yaml' }],
-      ['WebSearch', { query: 'suricata eve.json alert mikrotik address-list' }], ['fallo', 'Bash'], ['Edit', { file_path: '/home/manuel/infra/suricata-ids-lab/sync/mikrotik.py' }]] }
+  { id: 'demo-backend', cwd: '/home/usuario/proyectos/api', modelo: 'claude-opus-5-5', prompt: 'Añade paginación al endpoint de facturas',
+    pasos: [['Grep', { pattern: 'facturas', path: '/home/usuario/proyectos/api/src' }], ['Read', { file_path: '/home/usuario/proyectos/api/src/facturas/facturas.controller.ts' }],
+      ['Edit', { file_path: '/home/usuario/proyectos/api/src/facturas/facturas.service.ts' }], ['permiso', { command: 'npm test -- facturas' }],
+      ['Bash', { command: 'npm test -- facturas' }], ['Edit', { file_path: '/home/usuario/proyectos/api/src/facturas/dto/listar.dto.ts' }]] },
+  { id: 'demo-frontend', cwd: '/home/usuario/proyectos/web', modelo: 'claude-sonnet-5-5', prompt: 'Revisa la pantalla de pagos en móvil',
+    pasos: [['Glob', { pattern: 'src/**/pagos*.tsx' }], ['Read', { file_path: '/home/usuario/proyectos/web/src/pagos/PagosLista.tsx' }],
+      ['sub', 'Explore'], ['Edit', { file_path: '/home/usuario/proyectos/web/src/pagos/PagosLista.tsx' }], ['Bash', { command: 'npm run lint' }]] },
+  { id: 'demo-infra', cwd: '/home/usuario/proyectos/infra', modelo: 'claude-opus-5-5', prompt: 'Revisa por qué el servicio de alertas no avisa al router',
+    pasos: [['Bash', { command: 'docker compose logs --tail 80 alertas' }], ['Read', { file_path: '/home/usuario/proyectos/infra/alertas.yaml' }],
+      ['WebSearch', { query: 'enviar alertas a un router por ssh' }], ['fallo', 'Bash'], ['Edit', { file_path: '/home/usuario/proyectos/infra/sync/router.py' }]] }
 ];
 
 const espera = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,9 +44,9 @@ async function correr(oficina, g, retraso) {
         }
         await ev('SubagentStop', { agent_id: 'a-' + g.id, agent_type: datos });
       } else if (tipo === 'fallo') {
-        await ev('PreToolUse', { tool_name: datos, tool_input: { command: 'ssh admin@10.0.0.1 /ip firewall address-list print' } });
+        await ev('PreToolUse', { tool_name: datos, tool_input: { command: 'ssh admin@192.0.2.1 uptime' } });
         await espera(1500);
-        await ev('PostToolUseFailure', { tool_name: datos, error: 'ssh: connect to host 10.0.0.1 port 22: Connection timed out' });
+        await ev('PostToolUseFailure', { tool_name: datos, error: 'ssh: connect to host 192.0.2.1 port 22: Connection timed out' });
         continue;
       } else {
         await ev('PreToolUse', { tool_name: tipo, tool_input: datos });

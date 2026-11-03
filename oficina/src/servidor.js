@@ -3,10 +3,10 @@
 // lo transmite por WebSocket a la oficina 3D y entrega las órdenes del usuario a Claude.
 //
 // Dos puertos:
-//   PUERTO (7777)        panel web + WebSocket (+ /api/hook). Local, o publicado en la IP del VPS con
+//   PUERTO (7777)        panel web + WebSocket. Local, o publicado en la IP del VPS con
 //                        contraseña y HTTPS.
 //   PUERTO_HOOKS (7778)  solo /api/hook en HTTP plano, para Claude Code en la misma máquina.
-//                        El compose lo publica únicamente en 127.0.0.1.
+//                        Sin Docker escucha solo en 127.0.0.1; el compose lo publica únicamente ahí.
 
 const http = require('http');
 const https = require('https');
@@ -17,13 +17,12 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Oficina } = require('./oficina');
 const { Transcripts } = require('./transcripts');
-const { Acceso } = require('./acceso');
+const { Acceso, direccionesEscucha } = require('./acceso');
 const tls = require('./tls');
 
 const env = process.env;
 const PUERTO = Number(env.PUERTO_INTERNO || 7777);
 const PUERTO_HOOKS = Number(env.PUERTO_HOOKS_INTERNO || 7778);
-const ESCUCHA = env.ESCUCHA || '0.0.0.0';
 // En Docker ~/.claude está montado en /claude; sin Docker se usa el del propio usuario.
 const RAIZ_CLAUDE = env.CLAUDE_DIR_CONTENEDOR || (fs.existsSync('/claude') ? '/claude' : path.join(os.homedir(), '.claude'));
 const ARCHIVO_TOKEN = path.join(RAIZ_CLAUDE, 'ai-office', 'token');
@@ -35,6 +34,7 @@ const HOSTS_EXTRA = (env.HOSTS_PERMITIDOS || '').split(',').map((h) => h.trim().
 // Modo remoto: el panel se publica fuera de localhost (IP del VPS). Exige contraseña.
 const PUBLICAR_IP = String(env.PUBLICAR_IP || '127.0.0.1').trim();
 const REMOTO = env.ACCESO_REMOTO === '1' || !['127.0.0.1', 'localhost', '::1', ''].includes(PUBLICAR_IP);
+const { panel: ESCUCHA, hooks: ESCUCHA_HOOKS } = direccionesEscucha({ escucha: env.ESCUCHA, publicarIp: PUBLICAR_IP, remoto: REMOTO });
 const PASSWORD = env.OFICINA_PASSWORD || (env.OFICINA_PASSWORD_FILE ? safeLeer(env.OFICINA_PASSWORD_FILE) : '');
 const MODO_TLS = String(env.TLS || (REMOTO ? 'auto' : '0')).toLowerCase();
 
@@ -156,9 +156,9 @@ async function login(req, res) {
   if (!esJson(req)) return responder(res, 415, 'Se espera JSON');
   let datos;
   try { datos = JSON.parse(await leerCuerpo(req, 4096)); } catch { return json(res, 400, { error: 'Petición inválida' }); }
-  const r = acceso.entrar(req, datos && datos.password);
+  const r = await acceso.entrar(req, datos && datos.password);
   if (!r.ok) {
-    log(`Acceso fallido desde ${acceso.ip(req)}${r.esperaSeg ? ' (bloqueada)' : ''}`);
+    log(`Acceso fallido desde ${acceso.ip(req)}${r.esperaSeg ? ' (rechazado sin comprobar)' : ''}`);
     // Pequeña espera para frenar ataques de fuerza bruta.
     return setTimeout(() => json(res, r.esperaSeg ? 429 : 401, { error: r.error, esperaSeg: r.esperaSeg }), 600);
   }
@@ -182,7 +182,6 @@ function panel(req, res) {
   const ruta = u.pathname;
 
   if (req.method === 'POST') {
-    if (ruta === '/api/hook') return void hook(req, res).catch(() => responder(res, 500, 'Error'));
     if (ruta === '/api/login') return void login(req, res).catch(() => responder(res, 500, 'Error'));
     if (ruta === '/api/salir') return salir(req, res);
     return responder(res, 405, 'Método no permitido');
@@ -287,7 +286,7 @@ async function arrancar() {
     log(`Panel: ${cred ? 'https' : 'http'}://<host>:${PUERTO}` + (acceso.activo ? ' (con contraseña)' : ' (sin contraseña: solo uso local)') + (DEMO ? ' · modo demo' : ''));
   });
   const ganchos = http.createServer(soloHooks);
-  ganchos.listen(PUERTO_HOOKS, ESCUCHA, () => log(`Hooks: http://127.0.0.1:${PUERTO_HOOKS}/api/hook`));
+  ganchos.listen(PUERTO_HOOKS, ESCUCHA_HOOKS, () => log(`Hooks: http://127.0.0.1:${PUERTO_HOOKS}/api/hook`));
   servidores.push(principal, ganchos);
   if (!tokenEsperado() && !DEMO) log('Aviso: no hay token. Ejecuta el instalador de hooks (ver README).');
   if (REMOTO && !cred && env.CONFIAR_PROXY !== '1') log('Aviso: panel remoto SIN HTTPS. La contraseña viaja en claro; usa TLS=auto o un proxy con HTTPS.');

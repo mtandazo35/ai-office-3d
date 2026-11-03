@@ -734,7 +734,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
         else if (st === 'ejecutando') rx = -1.25 + Math.sin(t * 18 + i * 1.9) * 0.18 * mov;
         else if (st === 'esperando' && i === 1) { rx = -Math.PI * 0.95; rz = -0.2 + Math.sin(t * 6) * 0.15 * mov; }
         else if (st === 'pensando' && i === 1) { rx = -2.3; rz = 0.55; } // mano al mentón
-        else if (st === 'inactivo') rx = -0.35;
+        else if (st === 'inactivo' || st === 'sin_senal') rx = -0.35;
         else if (st === 'guardia') { rx = i ? -2.6 : -0.3; rz = i ? 0.9 : 0; } // saludo militar
         else rx = -1.0;
       }
@@ -783,6 +783,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
       else if (st === 'esperando') tipo = 'esperando';
       else if (st === 'error') tipo = 'error';
       else if (st === 'guardia') tipo = 'guardia';
+      else if (st === 'sin_senal') tipo = 'sin_senal';
       else if (st === 'inactivo' && s.ultimaActividad && Date.now() - s.ultimaActividad > 90000) tipo = 'dormido';
     }
     if (tipo === 'pensando') { const fr = Math.floor(t * 3) % 4; if (p.tipoBocadillo !== 'pensando' + fr) { pintarBocadillo(p.bocadillo, 'pensando', fr); p.tipoBocadillo = 'pensando' + fr; } }
@@ -807,10 +808,10 @@ export function crearEscena(canvas, { alSeleccionar }) {
       let op = 0.9;
       if (st === 'esperando' || st === 'error') op = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 6));
       else if (st === 'guardia') op = 0.5 + 0.4 * (0.5 + 0.5 * Math.sin(t * 2));
-      else if (st === 'inactivo' || st === 'terminada') op = 0.45;
+      else if (st === 'inactivo' || st === 'sin_senal' || st === 'terminada') op = 0.45;
       e.anillo.material.opacity = REDUCIDO ? 0.85 : op;
       e.anillo.scale.setScalar(st === 'ejecutando' ? 1 + Math.sin(t * 5) * 0.02 * mov : 1);
-      e.matPantalla.color.setScalar(st === 'inactivo' ? 0.75 : st === 'terminada' ? 0.35 : 1);
+      e.matPantalla.color.setScalar(st === 'inactivo' || st === 'sin_senal' ? 0.75 : st === 'terminada' ? 0.35 : 1);
       if (e.sobre.visible) e.sobre.position.y = 2.75 + Math.sin(t * 3) * 0.1 * mov;
       // Código que sale del monitor mientras trabaja
       if (st === 'ejecutando' && !REDUCIDO && t - e.ultimaParticula > 0.28) {
@@ -1010,7 +1011,7 @@ function texturaPizarra() {
 function pintarBocadillo(sp, tipo, frame = 0) {
   const cv = document.createElement('canvas'); cv.width = 160; cv.height = 128;
   const c = cv.getContext('2d');
-  const estilos = { pensando: ['#ffffff', '#4ea1ff'], esperando: ['#ffb545', '#3d2600'], error: ['#ff4d6d', '#ffffff'], guardia: ['#c9a6ff', '#1d0f3a'], dormido: ['#e0e7ff', '#3d5a80'] };
+  const estilos = { pensando: ['#ffffff', '#4ea1ff'], esperando: ['#ffb545', '#3d2600'], error: ['#ff4d6d', '#ffffff'], guardia: ['#c9a6ff', '#1d0f3a'], dormido: ['#e0e7ff', '#3d5a80'], sin_senal: ['#c08457', '#2b1a0c'] };
   const [fondo, tinta] = estilos[tipo] || estilos.pensando;
   c.fillStyle = fondo; c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = 4;
   c.beginPath(); c.roundRect(8, 8, 144, 84, 28); c.fill(); c.stroke();
@@ -1021,6 +1022,10 @@ function pintarBocadillo(sp, tipo, frame = 0) {
   else if (tipo === 'esperando') { c.font = '900 64px ' + SANS; c.fillText('?', 80, 54); }
   else if (tipo === 'error') { c.font = '900 64px ' + SANS; c.fillText('!', 80, 54); }
   else if (tipo === 'guardia') { c.beginPath(); c.moveTo(80, 22); c.lineTo(108, 32); c.lineTo(104, 62); c.quadraticCurveTo(96, 80, 80, 86); c.quadraticCurveTo(64, 80, 56, 62); c.lineTo(52, 32); c.closePath(); c.fill(); }
+  else if (tipo === 'sin_senal') { // barras de cobertura tachadas
+    [0, 1, 2].forEach((i) => c.fillRect(54 + i * 20, 66 - i * 14, 13, 14 + i * 14));
+    c.strokeStyle = tinta; c.lineWidth = 6; c.lineCap = 'round'; c.beginPath(); c.moveTo(46, 24); c.lineTo(114, 80); c.stroke();
+  }
   else if (tipo === 'dormido') { c.font = '800 34px ' + SANS; c.fillText('z', 58, 62); c.font = '800 46px ' + SANS; c.fillText('Z', 96, 46); }
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
   if (sp.material.map) sp.material.map.dispose();

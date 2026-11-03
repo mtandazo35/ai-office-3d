@@ -7,9 +7,13 @@ const fs = require('fs');
 const path = require('path');
 const { redactar } = require('./redactar');
 
-const ESTADOS = ['inactivo', 'pensando', 'ejecutando', 'esperando', 'guardia', 'error', 'terminada'];
+const ESTADOS = ['inactivo', 'pensando', 'ejecutando', 'esperando', 'guardia', 'error', 'sin_senal', 'terminada'];
 const MAX_LOG = 60;
 const MAX_ORDENES = 30;
+const MAX_LOTE = 9000;                  // additionalContext admite 10.000 caracteres; se deja margen para el encabezado
+const MAX_CONTINUACIONES = 8;           // Claude Code ignora el block de Stop a partir de ahí
+const SIN_SENAL_MS = 10 * 60 * 1000;
+const CERRADAS_MS = 25 * 60 * 1000;     // más que la ventana de 20 min de Transcripts.explorar()
 const MAX_NOMBRE = 24;
 const MAX_ROL = 30;
 const MAX_PERFILES_GUARDADOS = 200;
@@ -71,6 +75,7 @@ class Oficina extends EventEmitter {
     super();
     this.sesiones = new Map();
     this.esperas = new Map();          // sessionId -> { resolver, timer }
+    this.cerradas = new Map();         // sessionId -> cuándo se retiró tras terminar
     this.guardiaMaxMs = opts.guardiaMaxMs || 14 * 60 * 1000;
     this.ahora = opts.ahora || (() => Date.now());
     this.secuencia = 0;
@@ -185,7 +190,7 @@ class Oficina extends EventEmitter {
         estado: 'inactivo', herramienta: '', detalle: '', ultimoPrompt: '', ultimoMensaje: '',
         permiso: '', inicio: this.ahora(), ultimaActividad: this.ahora(),
         tokens: { contexto: 0, salida: 0 }, subagentes: {}, ordenes: [], guardia: false, log: [],
-        herramientasUsadas: 0, turnos: 0
+        herramientasUsadas: 0, turnos: 0, modoPermisos: '', continuaciones: 0
       };
       this.sesiones.set(id, s);
     }
@@ -207,7 +212,7 @@ class Oficina extends EventEmitter {
     return {
       id: s.id, nombre: s.nombre, rol: s.rol, genero: s.genero, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
       estado: s.estado, herramienta: s.herramienta, detalle: s.detalle,
-      ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso,
+      ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso, modoPermisos: s.modoPermisos,
       inicio: s.inicio, ultimaActividad: s.ultimaActividad, tokens: { ...s.tokens },
       subagentes: Object.values(s.subagentes).map((a) => ({ ...a })),
       ordenes: s.ordenes.map((o) => ({ ...o })), guardia: s.guardia, herramientasUsadas: s.herramientasUsadas, turnos: s.turnos,
@@ -222,12 +227,17 @@ class Oficina extends EventEmitter {
   procesar(ev) {
     if (!ev || typeof ev !== 'object' || typeof ev.session_id !== 'string' || !ev.session_id) return Promise.resolve(null);
     const nombre = String(ev.hook_event_name || '');
+    this.cerradas.delete(ev.session_id); // un hook es la prueba de que se ha reanudado
     const s = this.sesion(ev.session_id, ev.cwd);
     s.ultimaActividad = this.ahora();
+    // Hay señal otra vez: vuelve a lo que hacía y el evento sigue su curso normal.
+    if (s.estado === 'sin_senal') this.estado(s, s.estadoPrevio || 'pensando');
     if (ev.cwd && ev.cwd !== s.cwd) { s.cwd = ev.cwd; s.proyecto = proyectoDe(ev.cwd); }
     if (ev.transcript_path) s.transcript = String(ev.transcript_path);
     if (ev.model) s.modelo = typeof ev.model === 'string' ? ev.model : (ev.model.display_name || ev.model.id || s.modelo);
     if (s.origen !== 'hooks') s.origen = 'hooks';
+    // Solo el agente principal: un subagente puede tener su propio modo, y las órdenes van al principal.
+    if (!ev.agent_id && limpiarTexto(ev.permission_mode)) s.modoPermisos = limpiarTexto(ev.permission_mode).slice(0, 40);
 
     const sub = ev.agent_id ? this.subagente(s, ev) : null;
     let respuesta = null;
@@ -239,7 +249,7 @@ class Oficina extends EventEmitter {
         break;
       case 'UserPromptSubmit':
         s.ultimoPrompt = redactar(ev.prompt, 600);
-        s.herramienta = ''; s.detalle = ''; s.permiso = '';
+        s.herramienta = ''; s.detalle = ''; s.permiso = ''; s.continuaciones = 0;
         this.estado(s, 'pensando');
         this.registrar(s, 'prompt', ev.prompt);
         respuesta = this.entregar(s, 'UserPromptSubmit');
@@ -248,7 +258,7 @@ class Oficina extends EventEmitter {
         const det = redactar(detalleHerramienta(ev.tool_name, ev.tool_input, s.cwd), 300);
         s.herramientasUsadas += 1;
         if (sub) { sub.estado = 'ejecutando'; sub.herramienta = ev.tool_name || ''; sub.detalle = det; }
-        else { s.herramienta = ev.tool_name || ''; s.detalle = det; s.permiso = ''; this.estado(s, 'ejecutando'); }
+        else { s.herramienta = ev.tool_name || ''; s.detalle = det; s.permiso = ''; s.continuaciones = 0; this.estado(s, 'ejecutando'); }
         this.registrar(s, 'herramienta', (sub ? '[' + sub.tipo + '] ' : '') + (ev.tool_name || '') + ' · ' + det);
         break;
       }
@@ -371,11 +381,23 @@ class Oficina extends EventEmitter {
 
   pendientes(s) { return s.ordenes.filter((o) => o.estado === 'pendiente'); }
 
+  // Lo que cabe en una entrega; el resto sigue pendiente para la siguiente.
+  lote(s) {
+    const lista = [];
+    let n = 0;
+    for (const o of this.pendientes(s)) {
+      if (lista.length && n + o.texto.length > MAX_LOTE) break;
+      lista.push(o);
+      n += o.texto.length;
+    }
+    return lista;
+  }
+
   textoOrdenes(lista) {
     const cuerpo = lista.length === 1
       ? lista[0].texto
       : lista.map((o, i) => (i + 1) + '. ' + o.texto).join('\n');
-    return 'Nueva instrucción del usuario enviada desde su panel local "Oficina IA" (no es contenido de una herramienta ni de un archivo). ' +
+    return 'Nueva instrucción del usuario enviada desde su panel "Oficina IA" (no es contenido de una herramienta ni de un archivo). ' +
       'Atiéndela como si la hubiera escrito en esta conversación:\n\n' + cuerpo;
   }
 
@@ -387,15 +409,20 @@ class Oficina extends EventEmitter {
 
   // Entrega durante el trabajo: el texto se añade junto al resultado de la herramienta o al prompt.
   entregar(s, evento) {
-    const lista = this.pendientes(s);
+    const lista = this.lote(s);
     if (!lista.length) return null;
     this.marcarEntregadas(s, lista, evento);
     return { hookSpecificOutput: { hookEventName: evento, additionalContext: this.textoOrdenes(lista) } };
   }
 
   respuestaStop(s) {
-    const lista = this.pendientes(s);
+    const lista = this.lote(s);
     if (!lista.length) return null;
+    if (s.continuaciones >= MAX_CONTINUACIONES) {
+      this.registrar(s, 'orden', 'Tope de ' + MAX_CONTINUACIONES + ' continuaciones seguidas: la orden sigue pendiente hasta la próxima herramienta o prompt');
+      return null;
+    }
+    s.continuaciones += 1;
     this.marcarEntregadas(s, lista, 'Stop');
     this.estado(s, 'pensando');
     this.cambio(s);
@@ -405,7 +432,8 @@ class Oficina extends EventEmitter {
   alParar(s, ev) {
     const inmediata = this.respuestaStop(s);
     if (inmediata) return inmediata;
-    if (!s.guardia) { this.estado(s, 'inactivo'); this.registrar(s, 'fin', 'Turno terminado'); return null; }
+    // Órdenes en cola aquí = tope alcanzado: quedarse en guardia retendría a Claude sin poder entregarlas.
+    if (!s.guardia || this.pendientes(s).length) { this.estado(s, 'inactivo'); this.registrar(s, 'fin', 'Turno terminado'); return null; }
     // Modo guardia: el hook queda abierto hasta que llegue una orden, se desactive la guardia o venza el plazo.
     this.liberarEspera(s.id);
     this.estado(s, 'guardia');
@@ -442,12 +470,24 @@ class Oficina extends EventEmitter {
     for (const s of this.sesiones.values()) {
       const quitar = (s.estado === 'terminada' && t - (s.terminadaEn || t) > 60000) ||
         (t - s.ultimaActividad > 6 * 3600 * 1000 && !this.esperas.has(s.id));
-      if (quitar) { this.sesiones.delete(s.id); this.emit('quitar', s.id); }
+      if (quitar) {
+        if (s.estado === 'terminada') this.cerradas.set(s.id, t);
+        this.sesiones.delete(s.id);
+        this.emit('quitar', s.id);
+      } else if ((s.estado === 'ejecutando' || s.estado === 'pensando') && t - s.ultimaActividad > SIN_SENAL_MS) {
+        // Tras Esc o un cierre brusco no llega ningún evento; un Bash largo también cae aquí y vuelve con su PostToolUse.
+        s.estadoPrevio = s.estado;
+        this.estado(s, 'sin_senal');
+        this.registrar(s, 'aviso', 'Sin eventos desde hace más de 10 min');
+        this.cambio(s);
+      }
     }
+    for (const [id, cuando] of this.cerradas) if (t - cuando > CERRADAS_MS) this.cerradas.delete(id);
   }
 
   // Sesiones descubiertas por su transcript (antes de recibir hooks).
   descubierta(id, datos) {
+    if (this.cerradas.has(id)) return; // si se reanuda de verdad, los hooks la vuelven a crear
     const nueva = !this.sesiones.has(id);
     const s = this.sesion(id, datos.cwd);
     if (nueva) {

@@ -115,6 +115,8 @@ a.btn { display: inline-block; text-decoration: none; }
 .ordenes { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #141c2d; }
 .ordenes .eyebrow { color: var(--lila); }
 #f-orden { display: flex; flex-direction: column; gap: 8px; }
+.aviso-permisos { margin: 0; padding: 9px 11px; border: 1px solid var(--rojo); border-left-width: 4px; border-radius: 7px; background: rgba(255, 77, 109, .1); font-size: 13px; }
+.aviso-permisos b { color: var(--rojo); }
 textarea {
   width: 100%; resize: vertical; min-height: 72px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
   padding: 9px 10px; line-height: 1.4;

@@ -9,6 +9,15 @@ let seleccion = null;
 let config = {};
 let ws = null;
 let escena = null;
+const ESTADOS_VISIBLES = ['ejecutando', 'pensando', 'esperando', 'guardia', 'error', 'sin_senal', 'inactivo'];
+// Modos en los que Claude Code no pide aprobación: una orden se ejecuta sin que nadie la vea antes.
+const MODOS_SIN_APROBACION = new Set(['bypassPermissions', 'dontAsk', 'auto']);
+
+// Órdenes: el texto escrito es de un agente concreto y no sale de la caja hasta que el servidor confirma.
+const borradores = new Map();  // id de sesión -> texto sin enviar
+const enCurso = new Map();     // ref -> { id, texto, plazo, vencida }
+const PLAZO_ORDEN_MS = 5000;   // el servidor descarta sin responder lo que pasa de su límite de mensajes
+let refOrden = 0;
 
 // ---------- Escena 3D ----------
 try {
@@ -20,7 +29,7 @@ try {
 }
 
 // Leyenda
-for (const k of ['ejecutando', 'pensando', 'esperando', 'guardia', 'error', 'inactivo']) {
+for (const k of ESTADOS_VISIBLES) {
   const li = document.createElement('li');
   const i = document.createElement('i'); i.style.setProperty('background', COLORES[k]);
   li.append(i, NOMBRES[k]);
@@ -76,7 +85,7 @@ function pintarResumen() {
   sesiones.forEach((s) => { cuenta[s.estado] = (cuenta[s.estado] || 0) + 1; });
   const r = $('resumen'); r.replaceChildren();
   if (config.demo) r.append(el('span', {}, 'MODO DEMO'));
-  for (const k of ['ejecutando', 'pensando', 'esperando', 'guardia', 'error', 'inactivo']) {
+  for (const k of ESTADOS_VISIBLES) {
     if (!cuenta[k]) continue;
     const i = el('i'); i.style.setProperty('background', COLORES[k]);
     r.append(el('span', { title: NOMBRES[k] }, i, cuenta[k] + ' ' + NOMBRES[k].toLowerCase()));
@@ -149,6 +158,8 @@ function pintarDetalle() {
       el('span', { class: 't-nota' }, 'Apruébalo o recházalo en la terminal o en VS Code.'));
   } else if (s.estado === 'guardia') {
     ahora.append(el('span', { class: 't-tit' }, 'En guardia'), el('span', { class: 't-nota' }, 'Terminó su turno y espera una orden. Escríbela abajo y la ejecutará al momento.'));
+  } else if (s.estado === 'sin_senal') {
+    ahora.append(el('span', { class: 't-tit' }, 'Sin señal'), el('span', { class: 't-nota' }, 'Hace ' + hace(s.ultimaActividad) + ' que no manda eventos. Puede seguir en un comando largo, o haberse interrumpido o cerrado.'));
   } else if (s.herramienta) {
     ahora.append(el('span', { class: 't-tit' }, s.herramienta), el('span', { class: 't-det' }, s.detalle));
     if (s.estado !== 'ejecutando') ahora.append(el('span', { class: 't-nota' }, 'Última herramienta usada; ahora está ' + (NOMBRES[s.estado] || s.estado).toLowerCase() + '.'));
@@ -171,7 +182,12 @@ function pintarDetalle() {
 
   // Órdenes
   const terminada = s.estado === 'terminada';
-  $('orden').disabled = terminada; $('btn-orden').disabled = terminada;
+  const enviando = ordenEnviandose(s.id);
+  $('orden').disabled = terminada; $('btn-orden').disabled = terminada || enviando;
+  $('btn-orden').textContent = enviando ? 'Enviando…' : 'Enviar orden';
+  const sinAprobacion = MODOS_SIN_APROBACION.has(s.modoPermisos);
+  $('d-aviso-permisos').hidden = !sinAprobacion;
+  if (sinAprobacion) $('d-aviso-modo').textContent = s.modoPermisos;
   const firma = s.id + '|' + s.guardia;
   if (firma !== firmaFormulario) { $('guardia').checked = s.guardia; firmaFormulario = firma; }
   $('guardia').disabled = terminada;
@@ -194,6 +210,7 @@ function pintarDetalle() {
 
 function seleccionar(id) {
   seleccion = id && sesiones.has(id) ? id : null;
+  $('orden').value = (seleccion && borradores.get(seleccion)) || '';
   firmaFormulario = '';
   if (escena) escena.seleccionar(seleccion);
   pintarLista();
@@ -206,8 +223,16 @@ $('volver').addEventListener('click', () => seleccionar(null));
 $('f-orden').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const texto = $('orden').value.trim();
-  if (!texto || !seleccion) return;
-  if (enviar({ t: 'orden', id: seleccion, texto })) $('orden').value = '';
+  if (!texto || !seleccion || ordenEnviandose(seleccion)) return;
+  const ref = 'orden-' + (++refOrden);
+  if (!enviar({ t: 'orden', id: seleccion, ref, texto })) return;
+  enCurso.set(ref, { id: seleccion, texto, plazo: setTimeout(() => ordenSinRespuesta(ref), PLAZO_ORDEN_MS), vencida: false });
+  pintarDetalle();
+});
+$('orden').addEventListener('input', () => {
+  if (!seleccion) return;
+  if ($('orden').value) borradores.set(seleccion, $('orden').value);
+  else borradores.delete(seleccion);
 });
 $('orden').addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); $('f-orden').requestSubmit(); }
@@ -241,7 +266,45 @@ function enviar(msg) {
   ws.send(JSON.stringify(msg));
   return true;
 }
-function avisar(texto) { $('orden-ayuda').textContent = texto; setTimeout(() => { $('orden-ayuda').textContent = 'Se entrega en su próximo paso (tras una herramienta o al terminar el turno). Ctrl+Enter para enviar.'; }, 4000); }
+function avisar(texto) {
+  $('aviso-texto').textContent = texto;
+  if (!$('aviso').open) $('aviso').showModal();
+}
+$('aviso-cerrar').addEventListener('click', () => $('aviso').close());
+
+// ---------- Confirmación de órdenes ----------
+function ordenEnviandose(id) {
+  for (const o of enCurso.values()) if (o.id === id && !o.vencida) return true;
+  return false;
+}
+// Una respuesta tardía también cuenta: por eso una orden vencida sigue en enCurso hasta que se cae la conexión.
+function ordenRespondida(m) {
+  const o = enCurso.get(m.ref);
+  if (!o) return false;
+  clearTimeout(o.plazo);
+  enCurso.delete(m.ref);
+  if (m.error) {
+    avisar('La oficina rechazó la orden: ' + m.error + ' El texto sigue en la caja.');
+  } else if ((borradores.get(o.id) || '').trim() === o.texto) { // si siguió escribiendo, no se le borra lo nuevo
+    borradores.delete(o.id);
+    if (seleccion === o.id) $('orden').value = '';
+  }
+  pintarDetalle();
+  return true;
+}
+function ordenSinRespuesta(ref) {
+  const o = enCurso.get(ref);
+  if (!o) return;
+  o.vencida = true;
+  avisar('La oficina no ha confirmado la orden: puede haberse descartado por enviar demasiados mensajes seguidos. El texto sigue en la caja; mira la lista de órdenes del agente antes de reenviarla.');
+  pintarDetalle();
+}
+function ordenesSinConexion() {
+  let sinResolver = false;
+  for (const o of enCurso.values()) { clearTimeout(o.plazo); if (!o.vencida) sinResolver = true; }
+  enCurso.clear();
+  if (sinResolver) avisar('Se cortó la conexión antes de confirmar la orden. El texto sigue en la caja; mira la lista de órdenes del agente antes de reenviarla.');
+}
 
 // ---------- WebSocket con reconexión ----------
 let espera = 500;
@@ -262,13 +325,15 @@ function conectar() {
     } else if (m.t === 'sesion') {
       sesiones.set(m.s.id, m.s); pintarTodo();
     } else if (m.t === 'quitar') {
-      sesiones.delete(m.id); if (seleccion === m.id) seleccionar(null); pintarTodo();
-    } else if (m.t === 'respuesta' && m.error) {
-      avisar(m.error);
+      sesiones.delete(m.id); borradores.delete(m.id); if (seleccion === m.id) seleccionar(null); pintarTodo();
+    } else if (m.t === 'respuesta') {
+      if (!ordenRespondida(m) && m.error) avisar(m.error);
     }
   });
   ws.addEventListener('close', async (ev) => {
     estado.dataset.estado = 'caido'; estado.lastElementChild.textContent = 'Reconectando…';
+    ordenesSinConexion();
+    pintarDetalle();
     // Sesión caducada o cerrada: volver a la pantalla de acceso.
     if (ev.code === 4401) { location.replace('/login.html'); return; }
     try { const r = await fetch('/api/estado', { credentials: 'same-origin' }); if (r.status === 401) { location.replace('/login.html'); return; } } catch {}

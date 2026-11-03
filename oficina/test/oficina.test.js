@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Oficina, detalleHerramienta, NOMBRES_AGENTES } = require('../src/oficina');
+const { Oficina, detalleHerramienta, NOMBRES_AGENTES, ESTADOS } = require('../src/oficina');
 const { redactar } = require('../src/redactar');
 const { Transcripts } = require('../src/transcripts');
 
@@ -162,6 +162,20 @@ test('las rutas de transcripts no salen del montaje', () => {
   assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\projects\\p\\s.jsonl'), '/claude/projects/p/s.jsonl');
   assert.equal(t.rutaLocal('/home/m/.claude/projects/../settings.json'), null);
   assert.equal(t.rutaLocal('/etc/passwd'), null);
+  assert.equal(t.rutaLocal('/home/m/.claude/projects/../secreto.jsonl'), null);
+  assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\projects\\..\\secreto.jsonl'), null);
+  assert.equal(t.rutaLocal('/claude/projects/p/../../secreto.jsonl'), null);
+  assert.equal(t.rutaLocal('/claude/projects-otro/s.jsonl'), null);
+  assert.equal(t.rutaLocal('/claude/projects/p/s.jsonl'), '/claude/projects/p/s.jsonl');
+});
+
+test('las rutas de transcripts funcionan y no salen del montaje con una raíz de Windows', () => {
+  const t = new Transcripts(new Oficina(), { raiz: 'C:\\Users\\m\\.claude\\' });
+  assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\projects\\p\\s.jsonl'), 'C:/Users/m/.claude/projects/p/s.jsonl');
+  assert.equal(t.rutaLocal('/home/m/.claude/projects/p/s.jsonl'), 'C:/Users/m/.claude/projects/p/s.jsonl');
+  assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\projects\\..\\secreto.jsonl'), null);
+  assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\projects\\p\\..\\..\\..\\..\\secreto.jsonl'), null);
+  assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\settings.json'), null);
 });
 
 test('cada agente tiene nombre automático, estable y sin repetir', () => {
@@ -230,4 +244,372 @@ test('la lista incluye agentes guardados sin sesión, editables y olvidables', (
   assert.ok(o.olvidarPerfil('a').ok);
   assert.ok(o.olvidarPerfil('a').error);
   assert.ok(o.actualizarPerfil('a', { rol: 'x' }).error);
+});
+
+// ---------- Hallazgo 4: sesiones cerradas ----------
+function oficinaConReloj() {
+  const reloj = { t: 1000000 };
+  return { o: new Oficina({ ahora: () => reloj.t }), reloj };
+}
+
+test('una sesión cerrada no vuelve por su transcript', async () => {
+  const { o, reloj } = oficinaConReloj();
+  await ev(o, 'SessionEnd', { reason: 'exit' });
+  reloj.t += 61000;
+  o.limpiar();
+  assert.equal(o.sesiones.has('s1'), false);
+  o.descubierta('s1', { cwd: '/x', mtime: reloj.t });
+  assert.equal(o.sesiones.has('s1'), false);
+});
+
+test('el barrido de transcripts no resucita una sesión cerrada', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const carpeta = path.join(dir, 'projects', 'p');
+    fs.mkdirSync(carpeta, { recursive: true });
+    fs.writeFileSync(path.join(carpeta, 's1.jsonl'), JSON.stringify({ cwd: '/x', type: 'system' }) + '\n');
+    fs.writeFileSync(path.join(carpeta, 'otra.jsonl'), JSON.stringify({ cwd: '/x', type: 'system' }) + '\n');
+    const reloj = { t: Date.now() };
+    const o = new Oficina({ ahora: () => reloj.t });
+    await ev(o, 'SessionEnd', { reason: 'exit' });
+    reloj.t += 61000;
+    o.limpiar();
+    await new Transcripts(o, { raiz: dir }).explorar();
+    assert.deepEqual([...o.sesiones.keys()], ['otra'], 'la que no se cerró sí se descubre');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('una sesión cerrada que se reanuda vuelve por sus hooks y luego se ve con normalidad', async () => {
+  const { o, reloj } = oficinaConReloj();
+  await ev(o, 'SessionEnd', { reason: 'exit' });
+  reloj.t += 61000;
+  o.limpiar();
+  await ev(o, 'UserPromptSubmit', { prompt: 'sigo' });
+  assert.equal(o.sesiones.get('s1').estado, 'pensando');
+  o.descubierta('s1', { cwd: '/x', modelo: 'm1', mtime: reloj.t });
+  assert.equal(o.sesiones.get('s1').modelo, 'm1');
+});
+
+test('la lista de sesiones cerradas olvida pasada la ventana del transcript', async () => {
+  const { o, reloj } = oficinaConReloj();
+  await ev(o, 'SessionEnd', { reason: 'exit' });
+  reloj.t += 61000;
+  o.limpiar();
+  assert.equal(o.cerradas.size, 1);
+  reloj.t += 26 * 60 * 1000;
+  o.limpiar();
+  assert.equal(o.cerradas.size, 0);
+});
+
+// ---------- Hallazgo 9: permisos y texto de las órdenes ----------
+test('el texto de una orden no dice que el panel sea local', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  o.nuevaOrden('s1', 'algo');
+  const r = await ev(o, 'PostToolUse', { tool_name: 'Read' });
+  assert.doesNotMatch(r.hookSpecificOutput.additionalContext, /local/i);
+});
+
+test('modoPermisos sale de permission_mode y llega a la vista', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  const s = o.sesiones.get('s1');
+  assert.equal(o.vista(s).modoPermisos, '');
+  await ev(o, 'PreToolUse', { tool_name: 'Read', permission_mode: 'bypassPermissions' });
+  assert.equal(o.vista(s).modoPermisos, 'bypassPermissions');
+  await ev(o, 'PostToolUse', { tool_name: 'Read' });
+  assert.equal(o.vista(s).modoPermisos, 'bypassPermissions', 'un evento sin el campo no borra el último modo conocido');
+  await ev(o, 'PreToolUse', { tool_name: 'Read', permission_mode: 123 });
+  assert.equal(o.vista(s).modoPermisos, 'bypassPermissions');
+  await ev(o, 'PreToolUse', { tool_name: 'Read', agent_id: 'a1', permission_mode: 'plan' });
+  assert.equal(o.vista(s).modoPermisos, 'bypassPermissions', 'el modo de un subagente no es el de la sesión');
+  await ev(o, 'PreToolUse', { tool_name: 'Read', permission_mode: 'default' });
+  assert.equal(o.vista(s).modoPermisos, 'default');
+});
+
+// ---------- Hallazgo 11: límites de entrega ----------
+const LIMITE_CONTEXTO = 10000;
+
+test('cada entrega cabe en additionalContext y el resto sale en la siguiente', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  for (let i = 0; i < 5; i++) o.nuevaOrden('s1', String(i).repeat(4000));
+  const entregas = [];
+  for (let r; (r = await ev(o, 'PostToolUse', { tool_name: 'Read' }));) entregas.push(r.hookSpecificOutput.additionalContext);
+  assert.equal(entregas.length, 3);
+  for (const texto of entregas) assert.ok(texto.length <= LIMITE_CONTEXTO, 'entrega de ' + texto.length);
+  for (let i = 0; i < 5; i++) assert.ok(entregas.join('').includes(String(i).repeat(4000)));
+  assert.equal(o.pendientes(o.sesiones.get('s1')).length, 0);
+});
+
+test('el peor caso de lote, con numeración y encabezado, no pasa del límite', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  for (let i = 0; i < 30; i++) o.nuevaOrden('s1', 'y'.repeat(300));
+  const r = await ev(o, 'PostToolUse', { tool_name: 'Read' });
+  const texto = r.hookSpecificOutput.additionalContext;
+  assert.equal(texto.length > 9000, true, 'el lote llega al máximo: ' + texto.length);
+  assert.ok(texto.length <= LIMITE_CONTEXTO, 'entrega de ' + texto.length);
+  assert.equal(o.pendientes(o.sesiones.get('s1')).length, 0);
+});
+
+test('el Stop también entrega por lotes', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  for (let i = 0; i < 3; i++) o.nuevaOrden('s1', 'z'.repeat(4000));
+  const r = await ev(o, 'Stop', {});
+  assert.equal(r.decision, 'block');
+  assert.ok(r.reason.length <= LIMITE_CONTEXTO);
+  assert.equal(o.pendientes(o.sesiones.get('s1')).length, 1);
+});
+
+async function agotarContinuaciones(o) {
+  for (let i = 0; i < 8; i++) {
+    o.nuevaOrden('s1', 'orden ' + i);
+    assert.equal((await ev(o, 'Stop', {})).decision, 'block', 'continuación ' + i);
+  }
+}
+
+test('tras 8 continuaciones seguidas de Stop la orden sigue pendiente', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await agotarContinuaciones(o);
+  const { orden } = o.nuevaOrden('s1', 'la novena');
+  assert.equal(await ev(o, 'Stop', {}), null);
+  assert.equal(orden.estado, 'pendiente');
+  assert.equal(o.sesiones.get('s1').estado, 'inactivo');
+});
+
+test('PreToolUse reinicia el tope de continuaciones', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await agotarContinuaciones(o);
+  const { orden } = o.nuevaOrden('s1', 'la novena');
+  await ev(o, 'PreToolUse', { tool_name: 'Read' });
+  assert.equal((await ev(o, 'Stop', {})).decision, 'block');
+  assert.equal(orden.estado, 'entregada');
+});
+
+test('el PreToolUse de un subagente no reinicia el tope de continuaciones', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await agotarContinuaciones(o);
+  o.nuevaOrden('s1', 'la novena');
+  await ev(o, 'PreToolUse', { tool_name: 'Read', agent_id: 'a1' });
+  assert.equal(await ev(o, 'Stop', {}), null);
+});
+
+test('UserPromptSubmit reinicia el tope y entrega lo que quedó pendiente', async () => {
+  const o = new Oficina();
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await agotarContinuaciones(o);
+  const { orden } = o.nuevaOrden('s1', 'la novena');
+  assert.equal(await ev(o, 'Stop', {}), null);
+  const r = await ev(o, 'UserPromptSubmit', { prompt: 'sigue' });
+  assert.match(r.hookSpecificOutput.additionalContext, /la novena/);
+  assert.equal(orden.estado, 'entregada');
+  o.nuevaOrden('s1', 'otra');
+  assert.equal((await ev(o, 'Stop', {})).decision, 'block');
+});
+
+test('guardia en el tope: la orden queda pendiente y Claude no se queda retenido', async () => {
+  const o = new Oficina({ guardiaMaxMs: 500 });
+  await ev(o, 'UserPromptSubmit', { prompt: 'x' });
+  await agotarContinuaciones(o);
+  o.ponerGuardia('s1', true);
+  const p = ev(o, 'Stop', {});
+  await new Promise((r) => setImmediate(r));
+  assert.equal(o.sesiones.get('s1').estado, 'guardia');
+  const { orden } = o.nuevaOrden('s1', 'la novena');
+  assert.equal(await p, null);
+  assert.equal(orden.estado, 'pendiente');
+  assert.equal(o.esperas.has('s1'), false);
+  // Con órdenes en cola y el tope agotado, el siguiente Stop no abre otra espera.
+  const segundo = ev(o, 'Stop', {});
+  await new Promise((r) => setImmediate(r));
+  assert.equal(o.esperas.has('s1'), false);
+  assert.equal(await segundo, null);
+  assert.equal(orden.estado, 'pendiente');
+});
+
+// ---------- Hallazgo 14: sin señal ----------
+const MIN = 60 * 1000;
+
+test('sin_senal es un estado válido', () => {
+  assert.ok(ESTADOS.includes('sin_senal'));
+});
+
+for (const inicial of ['ejecutando', 'pensando']) {
+  test(inicial + ' pasa a sin_senal solo tras más de 10 min sin eventos', async () => {
+    const { o, reloj } = oficinaConReloj();
+    await ev(o, inicial === 'pensando' ? 'UserPromptSubmit' : 'PreToolUse', { prompt: 'x', tool_name: 'Bash', tool_input: { command: 'sleep 1' } });
+    const s = o.sesiones.get('s1');
+    assert.equal(s.estado, inicial);
+    const avisos = [];
+    o.on('sesion', (v) => avisos.push(v.estado));
+    reloj.t += 10 * MIN;
+    o.limpiar();
+    assert.equal(s.estado, inicial);
+    reloj.t += 1;
+    o.limpiar();
+    assert.equal(s.estado, 'sin_senal');
+    assert.equal(o.vista(s).estado, 'sin_senal');
+    assert.deepEqual(avisos, ['sin_senal'], 'el panel se entera del cambio');
+    assert.equal(o.sesiones.has('s1'), true);
+  });
+}
+
+for (const [nombre, preparar] of [
+  ['esperando', (o) => ev(o, 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } })],
+  ['inactivo', (o) => ev(o, 'Stop', {})],
+  ['error', (o) => ev(o, 'PostToolUseFailure', { tool_name: 'Bash', error: 'x' })]
+]) {
+  test(nombre + ' no cambia a sin_senal', async () => {
+    const { o, reloj } = oficinaConReloj();
+    await preparar(o);
+    const s = o.sesiones.get('s1');
+    assert.equal(s.estado, nombre);
+    reloj.t += 30 * MIN;
+    o.limpiar();
+    assert.equal(s.estado, nombre);
+  });
+}
+
+test('guardia no cambia a sin_senal', async () => {
+  const reloj = { t: 1000000 };
+  const o = new Oficina({ ahora: () => reloj.t, guardiaMaxMs: 60000 });
+  o.ponerGuardia(o.sesion('s1', base.cwd).id, true);
+  const p = ev(o, 'Stop', {});
+  await new Promise((r) => setImmediate(r));
+  reloj.t += 30 * MIN;
+  o.limpiar();
+  assert.equal(o.sesiones.get('s1').estado, 'guardia');
+  o.ponerGuardia('s1', false);
+  await p;
+});
+
+async function enSinSenal(inicial = 'ejecutando') {
+  const { o, reloj } = oficinaConReloj();
+  await ev(o, inicial === 'pensando' ? 'UserPromptSubmit' : 'PreToolUse', { prompt: 'x', tool_name: 'Bash', tool_input: { command: 'sleep 1' } });
+  reloj.t += 11 * MIN;
+  o.limpiar();
+  const s = o.sesiones.get('s1');
+  assert.equal(s.estado, 'sin_senal');
+  return { o, s };
+}
+
+for (const inicial of ['ejecutando', 'pensando']) {
+  test('PostToolUse saca de sin_senal a pensando (venía de ' + inicial + ')', async () => {
+    const { o, s } = await enSinSenal(inicial);
+    await ev(o, 'PostToolUse', { tool_name: 'Bash' });
+    assert.equal(s.estado, 'pensando');
+  });
+}
+
+test('cualquier evento saca de sin_senal con su efecto normal', async () => {
+  const casos = [
+    ['PreToolUse', { tool_name: 'Read' }, 'ejecutando'],
+    ['UserPromptSubmit', { prompt: 'y' }, 'pensando'],
+    ['PermissionRequest', { tool_name: 'Bash' }, 'esperando'],
+    ['PostToolUseFailure', { tool_name: 'Bash', error: 'x' }, 'error'],
+    ['Notification', { notification_type: 'idle_prompt' }, 'inactivo'],
+    ['Stop', {}, 'inactivo'],
+    ['StopFailure', { error: 'x' }, 'error'],
+    ['SessionEnd', { reason: 'exit' }, 'terminada'],
+    // Estos no fijan un estado propio: vuelve a lo que hacía antes de perder la señal.
+    ['SubagentStart', { agent_id: 'a1', agent_type: 'Explore' }, 'ejecutando'],
+    ['PreToolUse', { agent_id: 'a1', tool_name: 'Read' }, 'ejecutando'],
+    ['Notification', { notification_type: 'otro', message: 'hola' }, 'ejecutando']
+  ];
+  for (const [nombre, extra, esperado] of casos) {
+    const { o, s } = await enSinSenal();
+    await ev(o, nombre, extra);
+    assert.equal(s.estado, esperado, nombre + ' ' + JSON.stringify(extra));
+  }
+});
+
+// ---------- Hallazgo 15: lecturas de transcripts ----------
+function transcriptGrande(archivo, lineas) {
+  const relleno = 'r'.repeat(300);
+  let contenido = '';
+  for (let i = 0; i < lineas; i++) {
+    contenido += JSON.stringify({ type: 'assistant', cwd: '/x', relleno, message: { id: 'm' + i, model: 'modelo', usage: { output_tokens: 1, input_tokens: i } } }) + '\n';
+  }
+  fs.writeFileSync(archivo, contenido);
+}
+
+test('lecturas simultáneas del mismo transcript no se mezclan', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const archivo = path.join(dir, 's.jsonl');
+    const LINEAS = 2000; // varias veces el trozo de 64 KB de un flujo
+    transcriptGrande(archivo, LINEAS);
+    const t = new Transcripts(new Oficina());
+    let procesadas = 0;
+    const linea = t.linea.bind(t);
+    t.linea = (l, texto) => { procesadas += 1; linea(l, texto); };
+    const [a, b, c] = await Promise.all([t.leer('s', archivo), t.leer('s', archivo), t.leer('s', archivo.replace(/\\/g, '/'))]);
+    assert.equal(procesadas, LINEAS);
+    assert.equal(t.lectores.size, 1, 'la misma ruta con otro separador es el mismo archivo');
+    assert.equal(a, b);
+    assert.equal(b, c);
+    assert.equal(a.mensajes.size, LINEAS);
+    assert.equal(a.offset, fs.statSync(archivo).size);
+    assert.equal(a.resto, '');
+    assert.equal(t.colas.size, 0, 'la cola no se queda con rutas ya leídas');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('una lectura que falla no atasca las siguientes de esa ruta', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const archivo = path.join(dir, 's.jsonl');
+    transcriptGrande(archivo, 3);
+    const t = new Transcripts(new Oficina());
+    const original = t.leerAhora.bind(t);
+    t.leerAhora = () => { t.leerAhora = original; throw new Error('fallo de prueba'); };
+    await assert.rejects(t.leer('s', archivo));
+    assert.equal((await t.leer('s', archivo)).mensajes.size, 3);
+    assert.equal(t.colas.size, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('los lectores no crecen sin límite y sale el que lleva más tiempo sin usarse', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const rutas = ['a', 'b', 'c'].map((n) => path.join(dir, n + '.jsonl'));
+    rutas.forEach((r) => transcriptGrande(r, 1));
+    const t = new Transcripts(new Oficina(), { maxLectores: 2 });
+    await t.leer('a', rutas[0]);
+    await t.leer('b', rutas[1]);
+    await t.leer('a', rutas[0]); // «a» se usa de nuevo: la siguiente en salir es «b»
+    await t.leer('c', rutas[2]);
+    assert.deepEqual([...t.lectores.keys()].sort(), [path.resolve(rutas[0]), path.resolve(rutas[2])].sort());
+    // Un lector retirado se reconstruye leyendo desde el principio.
+    assert.equal((await t.leer('b', rutas[1])).mensajes.size, 1);
+    assert.equal(t.lectores.size, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('programar lee de verdad con la ruta que manda el hook', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const carpeta = path.join(dir, 'projects', 'p');
+    fs.mkdirSync(carpeta, { recursive: true });
+    transcriptGrande(path.join(carpeta, 's1.jsonl'), 2);
+    const o = new Oficina();
+    const s = o.sesion('s1', '/x');
+    s.transcript = '/otra/maquina/.claude/projects/p/s1.jsonl';
+    new Transcripts(o, { raiz: dir }).programar(s, 1);
+    for (let i = 0; i < 200 && s.tokens.salida !== 2; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(s.tokens.salida, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- Hallazgo 17: nada de nombres reales en la demo ----------
+test('la demo no lleva nombres reales ni IPs privadas', () => {
+  const demo = fs.readFileSync(path.join(__dirname, '..', 'src', 'demo.js'), 'utf8');
+  for (const prohibido of [/manuel/i, /suricata/i, /backend-isp/i, /frontend-isp/i, /mikrotik/i, /10\.0\.0\.1/]) assert.doesNotMatch(demo, prohibido);
+  assert.match(demo, /192\.0\.2\.1/);
+  assert.match(demo, /\/home\/usuario\/proyectos\/api/);
 });

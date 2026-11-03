@@ -1,6 +1,8 @@
 FROM node:22-alpine
 
 ENV NODE_ENV=production
+# Dentro del contenedor hay que escuchar en todas: quien limita es el "ports" del compose.
+ENV ESCUCHA=0.0.0.0
 WORKDIR /app
 
 COPY package.json package-lock.json ./

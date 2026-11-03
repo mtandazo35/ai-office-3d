@@ -2,7 +2,7 @@
 // Instala (o quita con --desinstalar) los hooks http de Claude Code que alimentan la Oficina IA.
 //
 // - Crea ~/.claude/ai-office/token (permisos 600) si no existe.
-// - Guarda una copia de ~/.claude/settings.json antes de tocarlo.
+// - Guarda una copia de ~/.claude/settings.json antes de tocarlo y conserva solo las 5 más recientes.
 // - Es idempotente: quita las entradas que instaló antes y vuelve a ponerlas.
 // - No toca ningún otro hook ni ajuste.
 //
@@ -23,11 +23,12 @@ const URL_HOOK = process.env.AI_OFFICE_URL || `http://127.0.0.1:${PUERTO_HOOKS}/
 const TOKEN_DADO = (process.env.AI_OFFICE_TOKEN || '').trim();
 const GUARDIA_MAX_MIN = Number(process.env.GUARDIA_MAX_MIN || 14);
 const CABECERA = 'X-AI-Office-Token';
+const COPIAS_A_CONSERVAR = 5;
 
 // Eventos que escucha la oficina. timeout en segundos.
 // Stop queda abierto en modo guardia: su timeout cubre el plazo de guardia más un margen.
+// SessionStart no está: la documentación de Claude Code dice que no admite hooks http.
 const EVENTOS = [
-  { evento: 'SessionStart', timeout: 5 },
   { evento: 'UserPromptSubmit', timeout: 5 },
   { evento: 'PreToolUse', matcher: '*', timeout: 5 },
   { evento: 'PostToolUse', matcher: '*', timeout: 5 },
@@ -119,6 +120,15 @@ try {
 } catch (e) {
   try { fs.unlinkSync(tmp); } catch {}
   salir(`No pude escribir ${ARCHIVO}: ${e.message}\nEn Linux, ejecuta el contenedor con tu usuario: UID_GID=$(id -u):$(id -g) en .env`);
+}
+
+// Solo las copias con el nombre exacto que genera este instalador; su fecha ISO ordena por nombre.
+const NOMBRE_COPIA = /^settings\.json\.bak-ai-office-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
+try {
+  const copias = fs.readdirSync(DIR, { withFileTypes: true }).filter((d) => d.isFile() && NOMBRE_COPIA.test(d.name)).map((d) => d.name).sort();
+  for (const nombre of copias.slice(0, -COPIAS_A_CONSERVAR)) fs.unlinkSync(path.join(DIR, nombre));
+} catch (e) {
+  console.error(`Aviso: no pude borrar copias antiguas: ${e.message}`);
 }
 
 if (DESINSTALAR) {

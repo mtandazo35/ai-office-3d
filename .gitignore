@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+oficina_password.txt
+docker-compose.override.yml
 *.log
 .claude/
 oficina/datos/

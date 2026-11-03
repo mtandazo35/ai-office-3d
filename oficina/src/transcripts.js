@@ -6,13 +6,20 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 
+const MAX_LECTORES = 200;
+
 class Transcripts {
   constructor(oficina, opts = {}) {
     this.oficina = oficina;
     this.raiz = opts.raiz || '/claude';                 // montaje de ~/.claude
     this.proyectos = path.join(this.raiz, 'projects');
     this.ventanaMs = opts.ventanaMs || 20 * 60 * 1000;  // sesiones modificadas en los últimos 20 min
+    // Las rutas de los hooks se comparan siempre con '/', también en Windows.
+    this.raizPosix = String(this.raiz).replace(/\\/g, '/').replace(/\/+$/, '');
+    this.proyectosPosix = this.raizPosix + '/projects';
     this.lectores = new Map();                          // ruta -> { offset, resto, mensajes: Map(id -> salida), contexto, modelo }
+    this.maxLectores = opts.maxLectores || MAX_LECTORES;
+    this.colas = new Map();                             // ruta -> promesa de la última lectura en curso
     this.pendientes = new Map();                        // id sesión -> timer (antirrebote)
   }
 
@@ -22,13 +29,13 @@ class Transcripts {
     if (!rutaHost) return null;
     const p = String(rutaHost).replace(/\\/g, '/');
     let local;
-    if (p.startsWith(this.proyectos + '/')) local = path.posix.normalize(p);
+    if (p.startsWith(this.proyectosPosix + '/')) local = path.posix.normalize(p);
     else {
       const i = p.indexOf('/.claude/projects/');
       if (i < 0) return null;
-      local = path.posix.normalize(path.posix.join(this.raiz, p.slice(i + '/.claude/'.length)));
+      local = path.posix.join(this.raizPosix, p.slice(i + '/.claude/'.length));
     }
-    if (!local.startsWith(this.proyectos + '/') || !local.endsWith('.jsonl')) return null;
+    if (!local.startsWith(this.proyectosPosix + '/') || !local.endsWith('.jsonl')) return null;
     return local;
   }
 
@@ -41,15 +48,27 @@ class Transcripts {
     }, ms));
   }
 
+  // Una lectura por archivo a la vez: dos flujos desde el mismo offset mezclarían l.resto.
   async leer(id, ruta) {
     if (!ruta) return;
+    // programar() y explorar() escriben la misma ruta con distinto separador en Windows.
+    const clave = path.resolve(ruta);
+    const turno = (this.colas.get(clave) || Promise.resolve()).catch(() => {}).then(() => this.leerAhora(id, ruta, clave));
+    this.colas.set(clave, turno);
+    const soltar = () => { if (this.colas.get(clave) === turno) this.colas.delete(clave); };
+    turno.then(soltar, soltar);
+    return turno;
+  }
+
+  async leerAhora(id, ruta, clave) {
     let st;
     try { st = await fsp.stat(ruta); } catch { return; }
-    let l = this.lectores.get(ruta);
-    if (!l || st.size < l.offset) {
-      l = { offset: 0, resto: '', mensajes: new Map(), contexto: 0, modelo: '', cwd: '', ultimoPrompt: '' };
-      this.lectores.set(ruta, l);
-    }
+    let l = this.lectores.get(clave);
+    if (!l || st.size < l.offset) l = { offset: 0, resto: '', mensajes: new Map(), contexto: 0, modelo: '', cwd: '', ultimoPrompt: '' };
+    // El más antiguo sin usar es el primero en salir; si vuelve a hacer falta, se relee entero.
+    this.lectores.delete(clave);
+    this.lectores.set(clave, l);
+    while (this.lectores.size > this.maxLectores) this.lectores.delete(this.lectores.keys().next().value);
     if (st.size === l.offset) return l;
     const fin = st.size;
     await new Promise((resolve, reject) => {

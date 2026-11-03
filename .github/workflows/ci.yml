@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: oficina
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: oficina/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Sintaxis de los módulos de public/
+        # Son módulos ES para el navegador: se copian como .mjs para que node --check los lea como tales.
+        run: |
+          tmp="$(mktemp -d)"
+          for f in public/*.js; do
+            destino="$tmp/$(basename "$f" .js).mjs"
+            cp "$f" "$destino"
+            node --check "$destino"
+          done

@@ -19,12 +19,12 @@ function puertoLibre() {
   });
 }
 
-async function levantar(t) {
+async function levantar(t, extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-srv-'));
   const panel = await puertoLibre(), hooks = await puertoLibre();
   const hijo = spawn(process.execPath, ['src/servidor.js'], {
     cwd: path.join(__dirname, '..'), stdio: 'ignore',
-    env: { ...process.env, ESCUCHA: '127.0.0.1', PUBLICAR_IP: '127.0.0.1', AI_OFFICE_DEMO: '0', OFICINA_PASSWORD: '', TLS: '0', PUERTO_INTERNO: String(panel), PUERTO_HOOKS_INTERNO: String(hooks), CLAUDE_DIR_CONTENEDOR: dir, DATOS_DIR: dir }
+    env: { ...process.env, ESCUCHA: '127.0.0.1', PUBLICAR_IP: '127.0.0.1', AI_OFFICE_DEMO: '0', OFICINA_PASSWORD: '', TLS: '0', PUERTO_INTERNO: String(panel), PUERTO_HOOKS_INTERNO: String(hooks), CLAUDE_DIR_CONTENEDOR: dir, DATOS_DIR: dir, ...extra }
   });
   const srv = { hijo, panel, hooks, muerto: false };
   hijo.on('exit', () => { srv.muerto = true; });
@@ -86,4 +86,41 @@ test('un mensaje de más de 64 KB cierra ese WebSocket y el servidor sigue vivo'
   await dormir(200);
   assert.equal(srv.muerto, false);
   assert.equal((await fetch(`${origen}/salud`)).status, 200);
+});
+
+test('/api/hook solo responde en el puerto de hooks', async (t) => {
+  const TOKEN = 'token-de-prueba';
+  const srv = await levantar(t, { AI_OFFICE_TOKEN: TOKEN });
+  const enviar = (puerto) => fetch(`http://127.0.0.1:${puerto}/api/hook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-AI-Office-Token': TOKEN },
+    body: JSON.stringify({ hook_event_name: 'Notification', session_id: 'prueba', message: 'hola' })
+  });
+  assert.equal((await enviar(srv.panel)).status, 405);
+  assert.equal((await enviar(srv.hooks)).status, 200);
+});
+
+const CLAVE = 'una-clave-larga-123';
+const entrar = (puerto, password, xff) => fetch(`http://127.0.0.1:${puerto}/api/login`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...(xff ? { 'X-Forwarded-For': xff } : {}) },
+  body: JSON.stringify({ password })
+});
+
+test('el login por HTTP entra con la clave buena y rechaza la mala', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t, { OFICINA_PASSWORD: CLAVE });
+  assert.equal((await entrar(srv.panel, 'mala')).status, 401);
+  const r = await entrar(srv.panel, CLAVE);
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('set-cookie'), /^oficina_sesion=/);
+});
+
+test('un ataque en paralelo con X-Forwarded-For falso queda bloqueado y /salud sigue respondiendo', { timeout: 20000 }, async (t) => {
+  const srv = await levantar(t, { OFICINA_PASSWORD: CLAVE, CONFIAR_PROXY: '1' });
+  const res = await Promise.all(Array.from({ length: 12 }, (_, i) => entrar(srv.panel, 'mala', `198.51.100.${i + 1}, 203.0.113.50`)));
+  assert.ok(res.filter((r) => r.status === 429).length >= 7);
+  assert.equal((await fetch(`http://127.0.0.1:${srv.hooks}/salud`)).status, 200);
+  assert.equal((await entrar(srv.panel, CLAVE, '198.51.100.200, 203.0.113.50')).status, 429);
+  // Otra IP real, la que escribió el proxy, no queda afectada.
+  assert.equal((await entrar(srv.panel, CLAVE, '203.0.113.51')).status, 200);
 });
