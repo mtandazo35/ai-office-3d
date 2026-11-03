@@ -28,6 +28,7 @@ class Pantalla(unittest.TestCase):
     def test_solo_responde_a_las_pantallas_conocidas(self):
         self.assertEqual(conector.teclas_para("Yes, I trust this folder"), ["Down", "Enter"])
         self.assertEqual(conector.teclas_para("Select login method:"), ["Enter"])
+        self.assertEqual(conector.teclas_para("Try the new fullscreen renderer?"), ["Escape"])
         self.assertIsNone(conector.teclas_para("Do you want to allow this dangerous thing?"))
         self.assertIsNone(conector.teclas_para("WARNING: bypass permissions mode"))
 

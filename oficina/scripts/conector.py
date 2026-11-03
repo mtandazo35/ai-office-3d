@@ -61,6 +61,7 @@ PANTALLAS = (
     ("Login successful", ["Enter"]),
     ("Security notes", ["Enter"]),
     ("trust this folder", ["Down", "Enter"]),
+    ("Try the new fullscreen renderer", ["Escape"]),  # anuncio: se responde «ahora no»
 )
 
 
@@ -271,8 +272,13 @@ def main():
     os.makedirs(os.path.dirname(SOCKET), mode=0o700, exist_ok=True)
     if os.path.exists(SOCKET):
         os.unlink(SOCKET)
-    os.umask(0o177)
-    with Servidor(SOCKET, Manejador) as servidor:
+    # El umask solo mientras se crea el socket: tmux y Claude lo heredarían y no podrían crear sus carpetas.
+    anterior = os.umask(0o177)
+    try:
+        servidor = Servidor(SOCKET, Manejador)
+    finally:
+        os.umask(anterior)
+    with servidor:
         servidor.serve_forever()
 
 
