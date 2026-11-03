@@ -37,6 +37,8 @@ services:
       OFICINA_PASSWORD: "${OFICINA_PASSWORD:-}"
       # Ruta DENTRO del contenedor; el archivo se monta aparte (ver README). Evita que la contraseña salga en docker inspect.
       OFICINA_PASSWORD_FILE: "${OFICINA_PASSWORD_FILE:-}"
+      # Usuario del servidor que trabaja con Claude Code: sale en el comando de «Conectar».
+      OFICINA_USUARIO: "${OFICINA_USUARIO:-}"
       TLS: "${TLS:-}"
       TLS_HOSTS: "${TLS_HOSTS:-}"
       TLS_CERT: "${TLS_CERT:-}"

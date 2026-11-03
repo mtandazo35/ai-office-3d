@@ -156,6 +156,8 @@ dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--lin
 dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .ayuda-cab { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
 .ayuda-cab h2 { font-size: 18px; }
+.comando { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.comando pre { flex: 1; min-width: 0; margin: 0; font-size: 14px; }
 .pasos { padding-left: 20px; display: flex; flex-direction: column; gap: 12px; }
 pre { background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; font-size: 13px; }
 code { font-size: .92em; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }

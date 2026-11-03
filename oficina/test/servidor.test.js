@@ -189,6 +189,16 @@ test('en local, un Host ajeno sigue recibiendo 421 aunque haya credencial (DNS r
   assert.match(r, /^HTTP\/1\.1 421/);
 });
 
+test('la configuración del panel da el usuario del comando de conexión, solo si es válido', { timeout: 20000 }, async (t) => {
+  const usuarioDe = async (valor) => {
+    const srv = await levantar(t, { OFICINA_USUARIO: valor });
+    const r = await fetch('http://127.0.0.1:' + srv.panel + '/api/estado', { headers: { Cookie: await cookieDe(srv) } });
+    return (await r.json()).config.usuario;
+  };
+  assert.equal(await usuarioDe('oficina'), 'oficina');
+  assert.equal(await usuarioDe('a; rm -rf x'), '');
+});
+
 test('con contraseña propia no se genera secreto ni enlace', { timeout: 20000 }, async (t) => {
   const srv = await levantar(t, { OFICINA_PASSWORD: CLAVE });
   assert.equal(fs.existsSync(path.join(srv.dir, 'panel-secreto')), false);

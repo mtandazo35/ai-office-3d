@@ -227,7 +227,7 @@ function soloHooks(req, res) {
 }
 
 function configPublica() {
-  return { token: !!tokenEsperado(), demo: DEMO, guardiaMaxMin: GUARDIA_MAX_MIN, transcripts: fs.existsSync(path.join(RAIZ_CLAUDE, 'projects')), auth: acceso.activo, remoto: REMOTO };
+  return { token: !!tokenEsperado(), demo: DEMO, guardiaMaxMin: GUARDIA_MAX_MIN, transcripts: fs.existsSync(path.join(RAIZ_CLAUDE, 'projects')), auth: acceso.activo, remoto: REMOTO, usuario: /^[a-z_][a-z0-9_-]*$/.test(env.OFICINA_USUARIO || '') ? env.OFICINA_USUARIO : '' };
 }
 
 // ---------- WebSocket ----------

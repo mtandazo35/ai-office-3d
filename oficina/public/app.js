@@ -260,12 +260,46 @@ $('f-nombre').addEventListener('submit', (ev) => {
   if (nombre && seleccion) enviar({ t: 'nombre', id: seleccion, nombre });
   $('renombrar').close();
 });
-$('btn-ayuda').addEventListener('click', () => $('ayuda').showModal());
+// El comando depende de por dónde se abrió el panel: por la IP del servidor sirve desde cualquier PC.
+function comandoConexion() {
+  const host = location.hostname;
+  const local = host === '127.0.0.1' || host === 'localhost' || host === '[::1]';
+  if (config.usuario && !local) return { intro: 'Abre una terminal en tu PC y pega este comando:', comando: 'ssh -t ' + config.usuario + '@' + host + ' claude' };
+  return { intro: 'En el equipo donde corre la oficina, abre una terminal y ejecuta:', comando: 'claude' };
+}
+function abrirAyuda() {
+  const { intro, comando } = comandoConexion();
+  $('con-intro').textContent = intro;
+  $('con-comando').textContent = comando;
+  $('con-copiar').textContent = 'Copiar';
+  $('ayuda').showModal();
+}
+// navigator.clipboard solo existe con HTTPS o en localhost; por HTTP en la red local hay que seleccionar y copiar.
+async function copiarTexto(texto) {
+  try {
+    if (navigator.clipboard) { await navigator.clipboard.writeText(texto); return true; }
+  } catch { /* probamos con la selección */ }
+  const area = document.createElement('textarea');
+  area.value = texto;
+  area.setAttribute('readonly', '');
+  area.className = 'oculto';
+  $('ayuda').append(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  area.remove();
+  return ok;
+}
+$('con-copiar').addEventListener('click', async () => {
+  const ok = await copiarTexto($('con-comando').textContent);
+  $('con-copiar').textContent = ok ? 'Copiado' : 'Selecciónalo y cópialo';
+});
+$('btn-ayuda').addEventListener('click', abrirAyuda);
 $('btn-salir').addEventListener('click', async () => {
   try { await fetch('/api/salir', { method: 'POST', credentials: 'same-origin' }); } catch {}
   location.replace('/login.html');
 });
-document.querySelector('[data-abre-ayuda]').addEventListener('click', () => $('ayuda').showModal());
+document.querySelector('[data-abre-ayuda]').addEventListener('click', abrirAyuda);
 
 function enviar(msg) {
   if (!ws || ws.readyState !== 1) { avisar('Sin conexión con la oficina; reintentando…'); return false; }

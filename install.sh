@@ -9,6 +9,7 @@
 #   OFICINA_USUARIO  usuario que trabaja con Claude Code (por defecto, quien usa sudo; si es root, "oficina")
 #   OFICINA_DIR      carpeta del repo (por defecto /root/ai-office-3d)
 #   OFICINA_RAMA     rama a instalar (por defecto main)
+#   OFICINA_SIN_CLAUDE=1  no instala Claude Code
 
 set -euo pipefail
 
@@ -87,6 +88,23 @@ preparar_env() {
   echo "CLAUDE_DIR=$casa/.claude" >> .env
 }
 
+# Claude Code se instala con el usuario, y el enlace deja usar `ssh -t usuario@ip claude`,
+# que no carga el perfil del usuario. Si falla, la oficina sigue siendo válida: solo se avisa.
+instalar_claude() {
+  local usuario=$1 casa
+  casa=$(getent passwd "$usuario" | cut -d: -f6)
+  [ "${OFICINA_SIN_CLAUDE:-0}" = 1 ] && return 0
+  if [ ! -x "$casa/.local/bin/claude" ]; then
+    su -l "$usuario" -c 'curl -fsSL https://claude.ai/install.sh | bash' </dev/null >/dev/null 2>&1 || true
+  fi
+  if [ -x "$casa/.local/bin/claude" ]; then
+    ln -sf "$casa/.local/bin/claude" /usr/local/bin/claude
+    su -l "$usuario" -c 'claude --version' </dev/null || true
+  else
+    echo "AVISO: no pude instalar Claude Code. Instálalo a mano con el usuario $usuario y repite."
+  fi
+}
+
 esperar_servicio() {
   local i estado=''
   for i in $(seq 1 24); do
@@ -125,12 +143,16 @@ main() {
   cd "$dir"
   git log -1 --format='%h %s'
   preparar_env "$usuario"
+  grep -q '^OFICINA_USUARIO=' .env || echo "OFICINA_USUARIO=$usuario" >> .env
 
   paso "Construyo y arranco la oficina"
   docker compose up -d --build --quiet-pull </dev/null
 
   paso "Instalo los hooks de Claude Code"
   docker compose run --rm instalar </dev/null
+
+  paso "Instalo Claude Code para $usuario"
+  instalar_claude "$usuario"
 
   paso "Compruebo el servicio"
   esperar_servicio
@@ -152,8 +174,8 @@ Oficina IA instalada. Solo escucha en 127.0.0.1: no hay ningún puerto abierto a
    Si caducó o ya lo usaste, la contraseña está en:
      docker compose -f $dir/docker-compose.yml exec oficina cat /datos/panel-secreto
 
-3. Trabaja con Claude Code con el usuario $usuario, en este mismo servidor.
-   Si aún no lo tienes: su -l $usuario  y sigue la instalación oficial de Claude Code.
+3. Para conectar un agente, pega esto en una terminal de tu PC y, la primera vez, inicia sesión:
+     ssh -t $usuario@${ip:-IP_DEL_SERVIDOR} claude
 
 Para quitar los hooks: cd $dir && docker compose run --rm instalar --desinstalar
 FIN

@@ -19,9 +19,11 @@ En el servidor donde trabaja Claude Code, como root o con `sudo`:
 curl -fsSL https://raw.githubusercontent.com/mtandazo35/ai-office-3d/main/install.sh | sudo bash
 ```
 
-Instala Docker si falta, clona el repo en `/root/ai-office-3d`, levanta la oficina y añade los hooks. El contenedor corre con un usuario normal: el que usa `sudo` o, si entras como root, uno nuevo llamado `oficina`, que acepta tus mismas claves SSH. Si el servidor tiene menos de 3 GB de RAM y no tiene swap, crea 2 GB. Se puede repetir para actualizar, y respeta el `.env` que ya exista.
+Instala Docker si falta, clona el repo en `/root/ai-office-3d`, levanta la oficina, añade los hooks e instala Claude Code. El contenedor corre con un usuario normal: el que usa `sudo` o, si entras como root, uno nuevo llamado `oficina`, que acepta tus mismas claves SSH. Si el servidor tiene menos de 3 GB de RAM y no tiene swap, crea 2 GB. Se puede repetir para actualizar, y respeta el `.env` que ya exista.
 
-La oficina queda en modo local: solo escucha en `127.0.0.1` y no abre ningún puerto a internet. Al terminar, el script muestra el túnel SSH y el enlace de un solo uso para entrar. Claude Code no se instala con este script.
+La oficina queda en modo local: solo escucha en `127.0.0.1` y no abre ningún puerto a internet. Al terminar, el script muestra el túnel SSH y el enlace de un solo uso para entrar.
+
+Para conectar un agente, pega en una terminal de tu PC `ssh -t USUARIO@IP claude` e inicia sesión la primera vez; el botón «Conectar Claude Code» del panel te da ese comando para copiarlo. Con `OFICINA_SIN_CLAUDE=1` no se instala Claude Code.
 
 Probado en Debian 13. Solo admite sistemas con `apt`, y en otras versiones de Debian o Ubuntu aún no se ha comprobado. Antes de ejecutarlo puedes leer [`install.sh`](install.sh).
 

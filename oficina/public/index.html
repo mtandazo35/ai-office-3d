@@ -123,13 +123,21 @@
     <h2>Conectar Claude Code con la oficina</h2>
     <button class="btn sec mini" aria-label="Cerrar">✕</button>
   </form>
-  <ol class="pasos">
-    <li><b>Instala los hooks</b> (una vez). Desde la carpeta del repositorio:
-      <pre>docker compose run --rm instalar</pre>
-      Añade a <code>~/.claude/settings.json</code> hooks de tipo <code>http</code> que envían cada evento a esta oficina, con un token propio. Guarda antes una copia del archivo.</li>
-    <li><b>Reinicia las sesiones</b> de Claude Code (terminal o VS Code) para que carguen los hooks. Comprueba con <code>/hooks</code>.</li>
-    <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio, con un nombre propio. En «Gestionar agentes» puedes cambiar el nombre, el rol y el género de cada uno. Pulsa sobre él para ver qué hace y darle órdenes.</li>
-  </ol>
+  <p id="con-intro">Abre una terminal en tu PC y pega este comando:</p>
+  <div class="comando">
+    <pre id="con-comando"></pre>
+    <button id="con-copiar" class="btn" type="button">Copiar</button>
+  </div>
+  <p class="nota">La primera vez, Claude te pedirá iniciar sesión con tu cuenta. Después, envíale un mensaje y su escritorio aparecerá aquí. Cada sesión que abras así es un agente.</p>
+  <details class="bloque">
+    <summary>Instalación manual o en otro equipo</summary>
+    <ol class="pasos">
+      <li><b>Instala los hooks</b> (una vez). Desde la carpeta del repositorio:
+        <pre>docker compose run --rm instalar</pre>
+        Añade a <code>~/.claude/settings.json</code> hooks de tipo <code>http</code> que envían cada evento a esta oficina, con un token propio. Guarda antes una copia del archivo.</li>
+      <li><b>Reinicia las sesiones</b> de Claude Code (terminal o VS Code) para que carguen los hooks. Comprueba con <code>/hooks</code>.</li>
+    </ol>
+  </details>
   <p class="nota">Las órdenes solo llegan a sesiones abiertas y conectadas: al cerrar una sesión ya no recibe ninguna, y lo que tuviera en cola se cancela. Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el modo de permisos de cada sesión: si pide aprobación, la sigue pidiendo en la terminal o en VS Code; en modo bypass o auto, una orden se ejecuta sin que nadie apruebe nada. El detalle del agente avisa cuando es así.</p>
 </dialog>
 
