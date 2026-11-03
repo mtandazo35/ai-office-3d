@@ -105,6 +105,20 @@ instalar_claude() {
   fi
 }
 
+valor_env() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
+
+# Dirección del panel según el .env: local por defecto, o publicado en una IP.
+url_panel() {
+  local ip puerto tls esquema=http
+  ip=$(valor_env PUBLICAR_IP); puerto=$(valor_env PUERTO); tls=$(valor_env TLS)
+  case "${ip:-127.0.0.1}" in
+    127.0.0.1|localhost|::1) ip=127.0.0.1 ;;
+    0.0.0.0|::) ip=$(hostname -I 2>/dev/null | awk '{print $1}'); [ "$tls" = 0 ] || esquema=https ;;
+    *) [ "$tls" = 0 ] || esquema=https ;;
+  esac
+  echo "$esquema://$ip:${puerto:-7777}"
+}
+
 esperar_servicio() {
   local i estado=''
   for i in $(seq 1 24); do
@@ -117,8 +131,8 @@ esperar_servicio() {
     falla "la oficina no llegó a estar sana (estado: ${estado:-desconocido})."
   fi
   local sin_credencial
-  sin_credencial=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/api/estado </dev/null || true)
-  [ "$sin_credencial" = 401 ] || echo "AVISO: el panel responde $sin_credencial sin credencial, y debería ser 401. Si cambiaste PUERTO en .env, ignóralo."
+  sin_credencial=$(curl -k -s -m 5 -o /dev/null -w '%{http_code}' "$(url_panel)/api/estado" </dev/null || true)
+  [ "$sin_credencial" = 401 ] || echo "AVISO: el panel responde $sin_credencial sin credencial, y debería ser 401."
 }
 
 main() {
@@ -162,8 +176,12 @@ main() {
   enlace=$(docker compose logs --no-log-prefix oficina </dev/null 2>/dev/null | grep -o 'http://[^ ]*entrar?c=[^ ]*' | tail -1 || true)
   ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 
-  cat <<FIN
-
+  local url
+  url=$(url_panel)
+  echo
+  case "$url" in
+    http://127.0.0.1:*)
+      cat <<FIN
 Oficina IA instalada. Solo escucha en 127.0.0.1: no hay ningún puerto abierto a internet.
 
 1. Desde tu PC, abre un túnel SSH:
@@ -173,9 +191,23 @@ Oficina IA instalada. Solo escucha en 127.0.0.1: no hay ningún puerto abierto a
      ${enlace:-docker compose logs oficina | grep entrar}
    Si caducó o ya lo usaste, la contraseña está en:
      docker compose -f $dir/docker-compose.yml exec oficina cat /datos/panel-secreto
+FIN
+      ;;
+    *)
+      cat <<FIN
+Oficina IA instalada y publicada, con contraseña, en:
+     $url
 
-3. Para conectar un agente, pega esto en una terminal de tu PC y, la primera vez, inicia sesión:
+La contraseña está en $dir/.env (OFICINA_PASSWORD):
+     grep ^OFICINA_PASSWORD= $dir/.env | cut -d= -f2-
+FIN
+      ;;
+  esac
+  cat <<FIN
+
+Para conectar un agente, pulsa «Conectar Claude Code» en el panel, o pega esto en una terminal de tu PC:
      ssh -t $usuario@${ip:-IP_DEL_SERVIDOR} claude
+La primera vez, Claude te pedirá iniciar sesión con tu cuenta.
 
 Para quitar los hooks: cd $dir && docker compose run --rm instalar --desinstalar
 FIN
