@@ -1,7 +1,10 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { Oficina, detalleHerramienta } = require('../src/oficina');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { Oficina, detalleHerramienta, NOMBRES_AGENTES } = require('../src/oficina');
 const { redactar } = require('../src/redactar');
 const { Transcripts } = require('../src/transcripts');
 
@@ -139,4 +142,40 @@ test('las rutas de transcripts no salen del montaje', () => {
   assert.equal(t.rutaLocal('C:\\Users\\m\\.claude\\projects\\p\\s.jsonl'), '/claude/projects/p/s.jsonl');
   assert.equal(t.rutaLocal('/home/m/.claude/projects/../settings.json'), null);
   assert.equal(t.rutaLocal('/etc/passwd'), null);
+});
+
+test('cada agente tiene nombre automático, estable y sin repetir', () => {
+  const a = new Oficina(), b = new Oficina();
+  assert.equal(a.sesion('sesion-1').nombre, b.sesion('sesion-1').nombre);
+  assert.ok(NOMBRES_AGENTES.includes(a.sesion('sesion-1').nombre));
+  const o = new Oficina();
+  const nombres = [];
+  for (let i = 0; i < NOMBRES_AGENTES.length + 3; i++) nombres.push(o.sesion('s' + i).nombre);
+  assert.equal(new Set(nombres).size, nombres.length);
+});
+
+test('renombrar valida el nombre y no admite duplicados', () => {
+  const o = new Oficina();
+  o.sesion('a'); o.sesion('b');
+  assert.ok(o.renombrar('no-existe', 'X').error);
+  assert.ok(o.renombrar('a', '   ').error);
+  assert.ok(o.renombrar('a', 'x'.repeat(25)).error);
+  assert.ok(o.renombrar('a', 123).error);
+  assert.ok(o.renombrar('a', 'Jefa de pruebas').ok);
+  assert.equal(o.vista(o.sesiones.get('a')).nombre, 'Jefa de pruebas');
+  assert.ok(o.renombrar('b', 'jefa de PRUEBAS').error);
+  assert.ok(o.renombrar('a', 'Jefa de pruebas').ok);
+  assert.ok(o.renombrar('b', ' a\u0007b ').ok);
+  assert.equal(o.sesiones.get('b').nombre, 'ab');
+});
+
+test('el nombre elegido sobrevive a un reinicio', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oficina-'));
+  try {
+    const archivoNombres = path.join(dir, 'sub', 'nombres.json');
+    const o = new Oficina({ archivoNombres });
+    o.sesion('a');
+    assert.ok(o.renombrar('a', 'Capitana').ok);
+    assert.equal(new Oficina({ archivoNombres }).sesion('a').nombre, 'Capitana');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -4,6 +4,7 @@ Oficina virtual en 3D, en tu propio equipo, para **ver trabajar a tus sesiones d
 
 - **Estilo videojuego:** la oficina es un diorama con suelo de madera, ventanas cuyo cielo sigue la hora real, reloj de pared, estantería, cafetera, plantas y sombras. Cada sesión es un personaje chibi con su propio aspecto: entra por la puerta, se sienta, teclea, levanta la mano cuando pide permiso, se rasca la cabeza al pensar y se va al cerrar la sesión.
 - **Efectos:** código flotando del monitor mientras trabaja, confeti al completar un turno, bocadillos («…», «?», «!», «Zz»), «¡Orden recibida!» y subidas de nivel. Cada agente sube de nivel según las acciones que hace, con su barra de XP. Los subagentes son robots ayudantes que vuelan alrededor de su escritorio.
+- **Nombres:** cada agente recibe un nombre propio y fijo para su sesión (Nico, Vera, Teo…). Puedes cambiarlo con «Renombrar» en su detalle, y el nombre elegido se conserva al reiniciar la oficina.
 - El monitor de cada escritorio muestra la herramienta y el archivo o comando en curso, y el anillo del suelo indica el estado: trabajando, pensando, espera tu aprobación, en guardia, error o inactivo.
 - Al pulsar un escritorio ves el detalle: permiso pendiente, contexto y tokens, último prompt y respuesta, y registro de actividad.
 - **Órdenes:** las escribes en el panel y Claude las recibe en su siguiente paso. Con el **modo guardia**, el agente se queda esperando órdenes de la oficina al terminar su turno.

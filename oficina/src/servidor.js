@@ -51,7 +51,7 @@ if (REMOTO && PASSWORD.length < 12) {
   process.exit(1);
 }
 
-const oficina = new Oficina({ guardiaMaxMs: GUARDIA_MAX_MIN * 60 * 1000 });
+const oficina = new Oficina({ guardiaMaxMs: GUARDIA_MAX_MIN * 60 * 1000, archivoNombres: path.join(DATOS, 'nombres.json') });
 const transcripts = new Transcripts(oficina, { raiz: RAIZ_CLAUDE });
 const acceso = new Acceso({ password: PASSWORD, confiarProxy: env.CONFIAR_PROXY === '1' });
 
@@ -240,6 +240,7 @@ wss.on('connection', (ws) => {
     if (m.t === 'orden') r = oficina.nuevaOrden(m.id, m.texto);
     else if (m.t === 'cancelar') r = { ok: oficina.cancelarOrden(m.id, String(m.ordenId || '')) };
     else if (m.t === 'guardia') r = { ok: oficina.ponerGuardia(m.id, !!m.activa) };
+    else if (m.t === 'nombre') r = oficina.renombrar(m.id, m.nombre);
     else return;
     ws.send(JSON.stringify({ t: 'respuesta', ref: m.ref, ...r }));
   });

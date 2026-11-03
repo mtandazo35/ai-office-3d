@@ -89,7 +89,10 @@ code, pre, .mono { font-family: var(--mono); }
 #detalle { display: flex; flex-direction: column; gap: 14px; }
 #detalle[hidden] { display: none; }
 .det-cab { display: flex; gap: 10px; align-items: flex-start; }
-.det-tit { min-width: 0; }
+.det-tit { min-width: 0; flex: 1; }
+#renombrar { width: min(380px, calc(100% - 24px)); }
+#f-nombre input { display: block; width: 100%; margin: 8px 0 14px; padding: 8px 10px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.fila-nombre { display: flex; justify-content: flex-end; gap: 8px; }
 .det-tit h2 { font-size: 19px; overflow-wrap: anywhere; }
 #d-cwd { margin: 2px 0 0; font-size: 12px; overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

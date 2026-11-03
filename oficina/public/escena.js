@@ -400,7 +400,7 @@ export function crearEscena(canvas, { alSeleccionar }) {
     e.anillo.material.color.set(color);
     e.led.material.color.set(color);
     const { nivel } = nivelDe(s.herramientasUsadas);
-    const textoEtq = 'Nv ' + nivel + '  ' + s.proyecto;
+    const textoEtq = 'Nv ' + nivel + '  ' + s.nombre + ' · ' + s.proyecto;
     if (textoEtq + s.estado !== e.firmaEtiqueta) {
       e.firmaEtiqueta = textoEtq + s.estado;
       repintarEtiqueta(e.etiqueta, textoEtq, { tam: 34, fijo: true, px: 26, color: '#ffffff', fondoColor: color === COLORES.inactivo ? 'rgba(43,45,66,0.92)' : color, colorTexto: color === COLORES.inactivo ? '#ffffff' : '#10131c' });

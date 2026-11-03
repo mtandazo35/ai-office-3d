@@ -11,6 +11,7 @@ Oficina 3D local para ver en tiempo real qué hace cada sesión de Claude Code (
     * 🟣 **En guardia:** terminó su turno y espera órdenes de la oficina.
     * 🔴 **Error:** falló una herramienta o la respuesta.
     * ⚪ **Inactivo:** sin actividad.
+* **Nombres:** cada sesión recibe un nombre automático derivado de su id, sin repetirlo entre agentes activos. Desde el panel se puede cambiar (máximo 24 caracteres y sin duplicados).
 * **Subagentes:** se ven como drones que orbitan sobre el escritorio de la sesión que los lanzó.
 * **Panel lateral:** muestra la lista de agentes y, al pulsar uno, su detalle: acción actual, permiso pendiente, contexto y tokens de salida, subagentes, último prompt y respuesta, registro de actividad y las órdenes.
 
@@ -78,7 +79,7 @@ La oficina puede darle instrucciones a Claude, y Claude actúa con los permisos 
 * **Lo que se muestra va enmascarado.** Antes de llegar al panel se recortan y ocultan claves privadas, tokens de GitHub/AWS/Slack/Anthropic/Google, JWT, `password=`, cabeceras `Authorization` y URLs con credenciales.
 * **Las órdenes no amplían permisos.** Claude las ejecuta con el sistema de permisos normal de Claude Code: si una acción requiere aprobación, la sigue pidiendo en la terminal. La oficina no aprueba ni rechaza permisos.
 * **Contenedor endurecido.** Usuario no root, sistema de archivos de solo lectura, `cap_drop: ALL`, `no-new-privileges`, límites de memoria y procesos, y `~/.claude` montado en solo lectura. Solo el paso `instalar` lo monta en escritura, y lo hace sin red.
-* **Sin persistencia.** El estado vive en memoria. Al reiniciar la oficina se recuperan las sesiones recientes desde los transcripts locales.
+* **Casi sin persistencia.** El estado vive en memoria; solo los nombres elegidos por el usuario se guardan, en `nombres.json` dentro de la carpeta de datos. Al reiniciar la oficina se recuperan las sesiones recientes desde los transcripts locales.
 
 ## 3. Estructura
 

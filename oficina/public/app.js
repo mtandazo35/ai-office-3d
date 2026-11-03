@@ -112,7 +112,7 @@ function pintarLista() {
     f.boton.style.setProperty('--c', COLORES[s.estado] || COLORES.inactivo);
     f.boton.setAttribute('aria-current', String(s.id === seleccion));
     poner(f.nv, 'Nv ' + nivelDe(s.herramientasUsadas).nivel);
-    poner(f.proy, s.proyecto + (pend ? '  ✉' + pend : ''));
+    poner(f.proy, s.nombre + ' · ' + s.proyecto + (pend ? '  ✉' + pend : ''));
     poner(f.est, NOMBRES[s.estado] || s.estado);
     poner(f.que, queHace(s));
     // Orden estable: solo se mueve si no está ya en su sitio.
@@ -131,6 +131,7 @@ function pintarDetalle() {
   $('lista-sec').hidden = !!s && matchMedia('(max-width: 900px)').matches;
   if (!s) return;
   const color = COLORES[s.estado] || COLORES.inactivo;
+  $('d-nombre').textContent = s.nombre;
   $('d-proyecto').textContent = s.proyecto;
   $('d-cwd').textContent = s.cwd;
 
@@ -210,6 +211,20 @@ $('orden').addEventListener('keydown', (ev) => {
 });
 $('guardia').addEventListener('change', (ev) => {
   if (seleccion) enviar({ t: 'guardia', id: seleccion, activa: ev.target.checked });
+});
+$('btn-renombrar').addEventListener('click', () => {
+  const s = seleccion && sesiones.get(seleccion);
+  if (!s) return;
+  $('nombre').value = s.nombre;
+  $('renombrar').showModal();
+  $('nombre').select();
+});
+$('nombre-cancelar').addEventListener('click', () => $('renombrar').close());
+$('f-nombre').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const nombre = $('nombre').value.trim();
+  if (nombre && seleccion) enviar({ t: 'nombre', id: seleccion, nombre });
+  $('renombrar').close();
 });
 $('btn-ayuda').addEventListener('click', () => $('ayuda').showModal());
 $('btn-salir').addEventListener('click', async () => {

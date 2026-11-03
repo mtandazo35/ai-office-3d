@@ -3,11 +3,22 @@
 // Traduce los eventos de los hooks a estados y gestiona la cola de órdenes de cada sesión.
 
 const { EventEmitter } = require('events');
+const fs = require('fs');
+const path = require('path');
 const { redactar } = require('./redactar');
 
 const ESTADOS = ['inactivo', 'pensando', 'ejecutando', 'esperando', 'guardia', 'error', 'terminada'];
 const MAX_LOG = 60;
 const MAX_ORDENES = 30;
+const MAX_NOMBRE = 24;
+const MAX_NOMBRES_GUARDADOS = 200;
+const NOMBRES_AGENTES = ['Nico', 'Lía', 'Teo', 'Vera', 'Bruno', 'Sara', 'Iker', 'Noa', 'Hugo', 'Alma', 'Dante', 'Luna', 'Marco', 'Inés', 'Leo', 'Julia', 'Omar', 'Clara', 'Tomás', 'Elsa', 'Gael', 'Nora', 'Raúl', 'Mía'];
+
+function hashTexto(t) {
+  let h = 0;
+  for (const c of String(t)) h = (h * 31 + c.codePointAt(0)) >>> 0;
+  return h;
+}
 
 function proyectoDe(cwd) {
   if (!cwd) return 'sin proyecto';
@@ -59,13 +70,72 @@ class Oficina extends EventEmitter {
     this.guardiaMaxMs = opts.guardiaMaxMs || 14 * 60 * 1000;
     this.ahora = opts.ahora || (() => Date.now());
     this.secuencia = 0;
+    this.archivoNombres = opts.archivoNombres || null;
+    this.nombresPropios = this.cargarNombres();
+  }
+
+  // ---------- Nombres ----------
+  // Los nombres elegidos por el usuario se guardan; los automáticos salen del id de la sesión.
+  cargarNombres() {
+    if (!this.archivoNombres) return new Map();
+    try {
+      const datos = JSON.parse(fs.readFileSync(this.archivoNombres, 'utf8'));
+      return new Map(Object.entries(datos).filter(([, n]) => typeof n === 'string'));
+    } catch { return new Map(); }
+  }
+
+  guardarNombres() {
+    if (!this.archivoNombres) return;
+    const tmp = this.archivoNombres + '.tmp';
+    try {
+      fs.mkdirSync(path.dirname(this.archivoNombres), { recursive: true });
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.nombresPropios), null, 2));
+      fs.renameSync(tmp, this.archivoNombres);
+    } catch (e) { console.error('No pude guardar los nombres:', e.message); }
+  }
+
+  nombreEnUso(nombre, salvoId) {
+    const buscado = nombre.toLocaleLowerCase('es');
+    for (const s of this.sesiones.values()) if (s.id !== salvoId && s.nombre.toLocaleLowerCase('es') === buscado) return true;
+    return false;
+  }
+
+  // Siempre el mismo para una sesión, salvo que ya lo lleve otro agente activo.
+  nombreAutomatico(id) {
+    const n = NOMBRES_AGENTES.length, inicio = hashTexto(id) % n;
+    for (let i = 0; i < n; i++) {
+      const nombre = NOMBRES_AGENTES[(inicio + i) % n];
+      if (!this.nombreEnUso(nombre, id)) return nombre;
+    }
+    for (let i = 2; ; i++) {
+      const nombre = NOMBRES_AGENTES[inicio] + ' ' + i;
+      if (!this.nombreEnUso(nombre, id)) return nombre;
+    }
+  }
+
+  renombrar(id, texto) {
+    const s = this.sesiones.get(id);
+    if (!s) return { error: 'La sesión ya no existe.' };
+    const nombre = typeof texto === 'string' ? texto.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+    if (!nombre) return { error: 'El nombre está vacío.' };
+    if ([...nombre].length > MAX_NOMBRE) return { error: 'El nombre supera ' + MAX_NOMBRE + ' caracteres.' };
+    if (this.nombreEnUso(nombre, id)) return { error: 'Ya hay otro agente activo con ese nombre.' };
+    const anterior = s.nombre;
+    s.nombre = nombre;
+    this.nombresPropios.delete(id);
+    this.nombresPropios.set(id, nombre);
+    while (this.nombresPropios.size > MAX_NOMBRES_GUARDADOS) this.nombresPropios.delete(this.nombresPropios.keys().next().value);
+    this.guardarNombres();
+    if (anterior !== nombre) this.registrar(s, 'sesion', 'Ahora se llama ' + nombre + ' (antes ' + anterior + ')');
+    this.cambio(s);
+    return { ok: true };
   }
 
   sesion(id, cwd) {
     let s = this.sesiones.get(id);
     if (!s) {
       s = {
-        id, cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
+        id, nombre: this.nombresPropios.get(id) || this.nombreAutomatico(id), cwd: cwd || '', proyecto: proyectoDe(cwd), modelo: '', origen: 'hooks',
         estado: 'inactivo', herramienta: '', detalle: '', ultimoPrompt: '', ultimoMensaje: '',
         permiso: '', inicio: this.ahora(), ultimaActividad: this.ahora(),
         tokens: { contexto: 0, salida: 0 }, subagentes: {}, ordenes: [], guardia: false, log: [],
@@ -89,7 +159,7 @@ class Oficina extends EventEmitter {
   // Copia segura para el navegador (sin timers ni promesas).
   vista(s) {
     return {
-      id: s.id, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
+      id: s.id, nombre: s.nombre, cwd: s.cwd, proyecto: s.proyecto, modelo: s.modelo, origen: s.origen,
       estado: s.estado, herramienta: s.herramienta, detalle: s.detalle,
       ultimoPrompt: s.ultimoPrompt, ultimoMensaje: s.ultimoMensaje, permiso: s.permiso,
       inicio: s.inicio, ultimaActividad: s.ultimaActividad, tokens: { ...s.tokens },
@@ -355,4 +425,4 @@ class Oficina extends EventEmitter {
   }
 }
 
-module.exports = { Oficina, detalleHerramienta, proyectoDe, ESTADOS };
+module.exports = { Oficina, detalleHerramienta, proyectoDe, ESTADOS, NOMBRES_AGENTES, MAX_NOMBRE };

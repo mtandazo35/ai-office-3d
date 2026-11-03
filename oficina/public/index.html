@@ -46,9 +46,11 @@
       <div class="det-cab">
         <button id="volver" class="btn sec mini" type="button" aria-label="Volver a la lista">←</button>
         <div class="det-tit">
-          <h2 id="d-proyecto"></h2>
+          <h2 id="d-nombre"></h2>
+          <p id="d-proyecto" class="tenue"></p>
           <p id="d-cwd" class="mono tenue"></p>
         </div>
+        <button id="btn-renombrar" class="btn sec mini" type="button">Renombrar</button>
       </div>
       <div class="chips" id="d-chips"></div>
 
@@ -102,6 +104,17 @@
   </aside>
 </div>
 
+<dialog id="renombrar">
+  <form id="f-nombre">
+    <label for="nombre"><b>Nombre del agente</b></label>
+    <input id="nombre" type="text" maxlength="24" autocomplete="off" required>
+    <div class="fila-nombre">
+      <button id="nombre-cancelar" class="btn sec" type="button">Cancelar</button>
+      <button class="btn" type="submit">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="ayuda">
   <form method="dialog" class="ayuda-cab">
     <h2>Conectar Claude Code con la oficina</h2>
@@ -112,7 +125,7 @@
       <pre>docker compose run --rm instalar</pre>
       Añade a <code>~/.claude/settings.json</code> hooks de tipo <code>http</code> que envían cada evento a esta oficina, con un token propio. Guarda antes una copia del archivo.</li>
     <li><b>Reinicia las sesiones</b> de Claude Code (terminal o VS Code) para que carguen los hooks. Comprueba con <code>/hooks</code>.</li>
-    <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio. Pulsa sobre él para ver qué hace y darle órdenes.</li>
+    <li><b>Trabaja como siempre.</b> Cada sesión aparece como un escritorio, con un nombre propio que puedes cambiar con «Renombrar». Pulsa sobre él para ver qué hace y darle órdenes.</li>
   </ol>
   <p class="nota">Para quitarlo: <code>docker compose run --rm instalar --desinstalar</code>. Las órdenes pasan por el sistema de permisos normal de Claude Code: no le dan permisos nuevos.</p>
 </dialog>
