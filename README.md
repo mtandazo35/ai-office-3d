@@ -23,7 +23,7 @@ Instala Docker si falta, clona el repo en `/root/ai-office-3d`, levanta la ofici
 
 La oficina queda en modo local: solo escucha en `127.0.0.1` y no abre ningún puerto a internet. Al terminar, el script muestra el túnel SSH y el enlace de un solo uso para entrar.
 
-Para conectar un agente, pulsa **Conectar Claude Code** en el panel. La primera vez te da un enlace para autorizar con tu cuenta y una caja donde pegar el código; después basta con el botón. Cada pulsación abre un agente, hasta 6, y le hablas desde su caja de órdenes; «Terminar» cierra su sesión. **Quien tenga la contraseña del panel puede abrir agentes y darles órdenes con tu cuenta y con los permisos de ese usuario**, así que trátala como una clave SSH. Por `http`, la contraseña y el código viajan sin cifrar por tu red. Con `OFICINA_SIN_CLAUDE=1` no se instala Claude Code ni el conector.
+Para conectar un agente, pulsa **Conectar Claude Code** en el panel. La primera vez te da un enlace para autorizar con tu cuenta y una caja donde pegar el código; después basta con el botón. Cada pulsación abre un agente, hasta 6, y le hablas desde su caja de órdenes; «Terminar» cierra su sesión, y **Cerrar sesión de Claude** termina todos y cierra tu cuenta en ese servidor. **Quien tenga la contraseña del panel puede abrir agentes y darles órdenes con tu cuenta y con los permisos de ese usuario**, así que trátala como una clave SSH. Por `http`, la contraseña y el código viajan sin cifrar por tu red. Con `OFICINA_SIN_CLAUDE=1` no se instala Claude Code ni el conector.
 
 Probado en Debian 13. Solo admite sistemas con `apt`, y en otras versiones de Debian o Ubuntu aún no se ha comprobado. Antes de ejecutarlo puedes leer [`install.sh`](install.sh).
 

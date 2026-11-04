@@ -296,7 +296,7 @@ $('con-copiar').addEventListener('click', async () => {
   $('con-copiar').textContent = ok ? 'Copiado' : 'Selecciónalo y cópialo';
 });
 // «Conectar»: con conector, el panel abre Claude en el servidor y pide el código aquí mismo.
-let conexionRef = '', agenteEnLogin = '', porSeleccionar = '';
+let conexionRef = '', agenteEnLogin = '', porSeleccionar = '', confirmarCuenta = false;
 function pedirConexion(msg) {
   conexionRef = 'c' + Date.now();
   return enviar({ ...msg, ref: conexionRef });
@@ -350,14 +350,27 @@ $('f-codigo').addEventListener('submit', (ev) => {
 $('btn-terminar').addEventListener('click', () => {
   const s = seleccion && sesiones.get(seleccion);
   if (!s) return;
+  confirmarCuenta = false;
+  $('terminar-si').textContent = 'Terminar';
   $('terminar-texto').textContent = '¿Terminar a ' + s.nombre + '? Se cierra su sesión de Claude y ya no recibirá órdenes.';
   $('terminar').showModal();
 });
 $('terminar-no').addEventListener('click', () => $('terminar').close());
 $('terminar-si').addEventListener('click', () => {
   $('terminar').close();
-  if (seleccion) enviar({ t: 'terminar', id: seleccion, ref: 'f' + Date.now() });
+  if (confirmarCuenta) enviar({ t: 'cerrarCuenta', ref: 'x' + Date.now() });
+  else if (seleccion) enviar({ t: 'terminar', id: seleccion, ref: 'f' + Date.now() });
+  confirmarCuenta = false;
 });
+$('btn-cerrar-claude').addEventListener('click', () => {
+  confirmarCuenta = true;
+  $('terminar-texto').textContent = '¿Cerrar la sesión de Claude en este servidor? Se terminan todos los agentes abiertos desde la oficina. Para volver a conectar tendrás que autorizar de nuevo con tu cuenta.';
+  $('terminar-si').textContent = 'Cerrar sesión';
+  $('terminar').showModal();
+});
+function pintarCuenta() {
+  $('btn-cerrar-claude').hidden = !(config.conector && config.claudeIniciado);
+}
 $('btn-ayuda').addEventListener('click', conectarClaude);
 $('btn-salir').addEventListener('click', async () => {
   try { await fetch('/api/salir', { method: 'POST', credentials: 'same-origin' }); } catch {}
@@ -424,6 +437,7 @@ function conectar() {
     if (m.t === 'snapshot') {
       sesiones.clear(); m.sesiones.forEach((s) => sesiones.set(s.id, s)); config = m.config || {};
       $('btn-salir').hidden = !config.auth;
+      pintarCuenta();
       if (seleccion && !sesiones.has(seleccion)) seleccion = null;
       pintarTodo();
     } else if (m.t === 'sesion') {
@@ -432,7 +446,11 @@ function conectar() {
     } else if (m.t === 'quitar') {
       sesiones.delete(m.id); borradores.delete(m.id); if (seleccion === m.id) seleccionar(null); pintarTodo();
     } else if (m.t === 'conexion') {
-      if (m.ref && m.ref[0] === 'f') { if (m.error) avisar(m.error); } else alConectar(m);
+      if (m.ref && m.ref[0] === 'f') { if (m.error) avisar(m.error); }
+      else if (m.ref && m.ref[0] === 'x') avisar(m.error || 'Sesión de Claude cerrada. Para volver a conectar, pulsa «Conectar Claude Code».');
+      else alConectar(m);
+    } else if (m.t === 'config') {
+      config = m.config || {}; pintarCuenta();
     } else if (m.t === 'respuesta') {
       if (!ordenRespondida(m) && m.error) avisar(m.error);
     }

@@ -57,6 +57,7 @@ const transcripts = new Transcripts(oficina, { raiz: RAIZ_CLAUDE });
 // Sin contraseña propia, el secreto generado hace de contraseña: Origin y Host no bastan como barrera,
 // porque cualquier programa del equipo los falsifica.
 const ARCHIVO_SECRETO = path.join(DATOS, 'panel-secreto');
+let claudeIniciado = false; // lo actualiza revisarAgentes
 const conector = crearConector(env.CONECTOR_SOCKET || path.join(RAIZ_CLAUDE, 'ai-office', 'conector.sock'), { forzado: !!env.CONECTOR_SOCKET });
 const acceso = new Acceso({ password: PASSWORD || obtenerSecreto(ARCHIVO_SECRETO, log), confiarProxy: env.CONFIAR_PROXY === '1' });
 
@@ -229,7 +230,7 @@ function soloHooks(req, res) {
 }
 
 function configPublica() {
-  return { token: !!tokenEsperado(), demo: DEMO, guardiaMaxMin: GUARDIA_MAX_MIN, transcripts: fs.existsSync(path.join(RAIZ_CLAUDE, 'projects')), auth: acceso.activo, remoto: REMOTO, conector: conector.disponible(), usuario: /^[a-z_][a-z0-9_-]*$/.test(env.OFICINA_USUARIO || '') ? env.OFICINA_USUARIO : '' };
+  return { token: !!tokenEsperado(), demo: DEMO, guardiaMaxMin: GUARDIA_MAX_MIN, transcripts: fs.existsSync(path.join(RAIZ_CLAUDE, 'projects')), auth: acceso.activo, remoto: REMOTO, conector: conector.disponible(), claudeIniciado, usuario: /^[a-z_][a-z0-9_-]*$/.test(env.OFICINA_USUARIO || '') ? env.OFICINA_USUARIO : '' };
 }
 
 // ---------- WebSocket ----------
@@ -250,7 +251,7 @@ function enviarTodos(msg) {
 
 function atenderConector(ws, m, promesa) {
   promesa.catch((e) => ({ error: e.message })).then((r) => {
-    if (r.estado === 'listo' && r.sessionId) oficina.agenteConectado(r.sessionId, r.cwd);
+    if (r.estado === 'listo' && r.sessionId) { oficina.agenteConectado(r.sessionId, r.cwd); revisarAgentes().catch(() => {}); }
     if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'conexion', ref: m.ref, ...r }));
   });
 }
@@ -268,7 +269,13 @@ function entregarPorTerminal(id) {
 async function revisarAgentes() {
   if (!conector.disponible()) return;
   let abiertos;
-  try { abiertos = (await conector.pedir('GET', '/estado', undefined, 5000)).agentes; } catch { return; }
+  let estado;
+  try { estado = await conector.pedir('GET', '/estado', undefined, 5000); } catch { return; }
+  abiertos = estado.agentes;
+  if (!!estado.autenticado !== claudeIniciado) {
+    claudeIniciado = !!estado.autenticado;
+    enviarTodos({ t: 'config', config: configPublica() });
+  }
   const ids = new Set(abiertos.map((a) => a.sessionId));
   for (const a of abiertos) oficina.agenteConectado(a.sessionId, a.cwd);
   for (const s of oficina.sesiones.values()) if (s.enTerminal && !ids.has(s.id)) oficina.agenteCerrado(s.id, 'ya no está abierto');
@@ -287,6 +294,13 @@ wss.on('connection', (ws) => {
     if (!m || typeof m !== 'object') return;
     if (m.t === 'conectar') return void atenderConector(ws, m, conector.pedir('POST', '/agentes', {}));
     if (m.t === 'codigo') return void atenderConector(ws, m, conector.pedir('POST', '/codigo', { agente: String(m.agente || ''), codigo: m.codigo }));
+    if (m.t === 'cerrarCuenta') {
+      return void atenderConector(ws, m, conector.pedir('POST', '/cerrar-cuenta', {}).then((r) => {
+        for (const s of oficina.sesiones.values()) if (s.enTerminal) oficina.agenteCerrado(s.id, 'cuenta cerrada');
+        revisarAgentes().catch(() => {});
+        return r;
+      }));
+    }
     if (typeof m.id !== 'string') return;
     if (m.t === 'terminar') return void atenderConector(ws, m, conector.pedir('POST', '/terminar', { sessionId: m.id }).then((r) => { oficina.agenteCerrado(m.id, 'cerrado desde la oficina'); return r; }));
     let r;

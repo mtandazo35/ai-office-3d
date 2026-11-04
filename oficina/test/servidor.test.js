@@ -281,6 +281,7 @@ test('«Conectar» devuelve el enlace, envía el código al conector y registra 
 
 test('una orden a un agente parado se escribe en su terminal; si falla, vuelve a la cola', { timeout: 20000 }, async (t) => {
   const falso = await conectorFalso(t, {
+    '/estado': { autenticado: true, agentes: [{ agente: 'agente-1', sessionId: 'a1', cwd: '/x' }] },
     '/agentes': { estado: 'listo', agente: 'agente-1', sessionId: 'a1', cwd: '/x' },
     '/enviar': { __codigo: 409, error: 'El agente está ocupado.' }
   });
@@ -310,5 +311,27 @@ test('sin conector, el panel lo sabe y «conectar» responde un error', { timeou
   assert.equal((await espera((m) => m.t === 'snapshot')).config.conector, false);
   ws.send(JSON.stringify({ t: 'conectar', ref: 'r1' }));
   assert.ok((await espera((m) => m.t === 'conexion' && m.ref === 'r1')).error);
+  ws.terminate();
+});
+
+test('cerrar la sesión de Claude pasa por el conector, cierra los agentes y avisa al panel', { timeout: 30000 }, async (t) => {
+  const respuestas = {
+    '/estado': { autenticado: true, agentes: [{ agente: 'agente-1', sessionId: 'a1', cwd: '/x' }] },
+    '/cerrar-cuenta': { ok: true, autenticado: false }
+  };
+  const falso = await conectorFalso(t, respuestas);
+  const srv = await levantar(t, { CONECTOR_SOCKET: falso.ruta });
+  await dormir(500);
+  const { ws, espera } = await wsConSesion(srv);
+  const inicio = await espera((m) => m.t === 'snapshot');
+  assert.equal(inicio.config.claudeIniciado, true);
+  assert.ok(inicio.sesiones.some((s) => s.id === 'a1' && s.enTerminal));
+  respuestas['/estado'] = { autenticado: false, agentes: [] };
+  ws.send(JSON.stringify({ t: 'cerrarCuenta', ref: 'x1' }));
+  const r = await espera((m) => m.t === 'conexion' && m.ref === 'x1');
+  assert.equal(r.ok, true);
+  assert.equal(falso.pedidos.filter((p) => p.ruta === '/cerrar-cuenta').length, 1);
+  await espera((m) => m.t === 'sesion' && m.s.id === 'a1' && m.s.estado === 'terminada');
+  await espera((m) => m.t === 'config' && m.config.claudeIniciado === false);
   ws.terminate();
 });

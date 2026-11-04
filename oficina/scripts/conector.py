@@ -223,6 +223,28 @@ def terminar(session_id):
     return 200, {"ok": True}
 
 
+def cuenta_iniciada():
+    try:
+        with open(CREDENCIALES, encoding="utf-8") as f:
+            return any(json.load(f).values())
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def cerrar_cuenta():
+    """Termina los agentes abiertos y cierra la cuenta con el comando de Claude Code."""
+    with cerrojo:
+        for a in agentes():
+            tmux("kill-session", "-t", "=" + a["agente"])
+        try:
+            r = subprocess.run(["claude", "auth", "logout"], capture_output=True, text=True, errors="replace", timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return 500, {"error": "No pude ejecutar el cierre de sesión de Claude."}
+        if r.returncode != 0:
+            return 500, {"error": "Claude no pudo cerrar la sesión."}
+    return 200, {"ok": True, "autenticado": cuenta_iniciada()}
+
+
 # ---------- Servidor local ----------
 class Manejador(BaseHTTPRequestHandler):
     def address_string(self):
@@ -241,7 +263,7 @@ class Manejador(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/estado":
-            return self.responder(200, {"autenticado": os.path.exists(CREDENCIALES), "agentes": [a for a in agentes() if a["sessionId"]]})
+            return self.responder(200, {"autenticado": cuenta_iniciada(), "agentes": [a for a in agentes() if a["sessionId"]]})
         return self.responder(404, {"error": "No encontrado"})
 
     def do_POST(self):
@@ -259,6 +281,8 @@ class Manejador(BaseHTTPRequestHandler):
             return self.responder(200, enviar_codigo(str(d.get("agente", "")), d.get("codigo")))
         if self.path == "/enviar":
             return self.responder(*enviar_texto(str(d.get("sessionId", "")), d.get("texto", "")))
+        if self.path == "/cerrar-cuenta":
+            return self.responder(*cerrar_cuenta())
         if self.path == "/terminar":
             return self.responder(*terminar(str(d.get("sessionId", ""))))
         return self.responder(404, {"error": "No encontrado"})
